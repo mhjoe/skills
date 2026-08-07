@@ -1,0 +1,30 @@
+{
+  "$schema": "docu-git-v1.0",
+  "project_name": "Document Git Tracking",
+  "created_at": "2026-08-07T16:00:00+09:00",
+  "last_updated": "2026-08-07T16:00:00+09:00",
+  "active_branch": "main",
+  "current_version": "v0.1",
+  "documents": [
+    {
+      "doc_id": "doc_001",
+      "base_name": "문서명",
+      "current_file": "문서명_v0.1_최초작성.md",
+      "current_version": "v0.1",
+      "history": [
+        {
+          "commit_id": "doc-commit-20260807-160000",
+          "version": "v0.1",
+          "filename": "문서명_v0.1_최초작성.md",
+          "timestamp": "2026-08-07T16:00:00+09:00",
+          "user_input_summary": "최초 문서 작성 요청",
+          "output_summary": "기본 개요 및 서론 구조 작성 완료",
+          "key_changes": [
+            "서론 작성",
+            "목차 뼈대 구성"
+          ]
+        }
+      ]
+    }
+  ]
+}
