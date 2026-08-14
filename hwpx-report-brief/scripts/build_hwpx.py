@@ -122,6 +122,45 @@ def char_height(h, cid):
     m = re.search(r'<hh:charPr id="%s"[^>]*height="(\d+)"' % cid, h)
     return int(m.group(1)) if m else 0
 
+def line_spacing_pct(h, pid):
+    """문단모양의 줄간격(PERCENT). PERCENT가 아니면 100으로 본다."""
+    try:
+        x = parapr_xml(h, pid)
+    except AttributeError:
+        return 100
+    m = re.search(r'<hh:lineSpacing type="PERCENT" value="(\d+)"', x)
+    return int(m.group(1)) if m else 100
+
+def para_gap(h, pid):
+    """문단 위/아래 간격(prev, next) HWPUNIT."""
+    try:
+        x = parapr_xml(h, pid)
+    except AttributeError:
+        return 0, 0
+    mg = re.search(r'<hh:margin>.*?</hh:margin>', x, re.S)
+    blk = mg.group(0) if mg else x
+    def g(k):
+        m = re.search(r'<hc:%s value="(-?\d+)"' % k, blk)
+        return int(m.group(1)) if m else 0
+    return g('prev'), g('next')
+
+def split_cells(x):
+    """표 XML에서 최상위 <hp:tc> 구간 [(start, end), ...]를 돌려준다."""
+    out, st, start = [], 0, None
+    for m in re.finditer(r'<hp:tc\b|</hp:tc>', x):
+        if m.group().startswith('<hp:tc'):
+            if st == 0:
+                start = m.start()
+            st += 1
+        else:
+            st -= 1
+            if st == 0:
+                out.append((start, m.end()))
+    return out
+
+def para_texts(p):
+    return [t for t in re.findall(r'<hp:t>([^<]*)</hp:t>', p)]
+
 STY = parse_styles(hdr)
 BODY = STY.get('본문') or STY.get('바탕글')
 NORMAL = STY.get('바탕글')
@@ -201,8 +240,17 @@ def find_idx(pred, lo=0):
             return i
     return None
 
-toc_title_i = find_idx(lambda p: '목  차' in p or '목 차' in p or '목차' in p) or 1
-toc_table_i = find_idx(lambda p: 'numberingType="TABLE"' in p, toc_title_i)
+TOC_TITLE_RE = re.compile(r'목\s*차')
+def is_toc_title_para(p):
+    return any(TOC_TITLE_RE.fullmatch(t.strip()) for t in para_texts(p))
+
+toc_title_i = find_idx(is_toc_title_para) or 1
+# 목차 '제목'과 목차 '항목 표'는 별개의 문단이다. 제목이 장식 표(얇은 칸으로 좌우를 감싼
+# 표) 안에 들어 있는 템플릿이 흔한데, 그 표를 항목 표로 오인하면 폭이 몇 mm뿐인 장식 칸에
+# 항목 텍스트가 들어가 한 글자씩 줄바꿈되며 목차 표가 세로로 폭발한다.
+# → 제목 문단 '다음'부터 찾고, 제목 텍스트를 품은 표는 후보에서 제외한다.
+toc_table_i = find_idx(lambda p: 'numberingType="TABLE"' in p and not is_toc_title_para(p),
+                       toc_title_i + 1)
 divider_i = find_idx(lambda p: '<hp:t>제 목</hp:t>' in p or '<hp:t>제목</hp:t>' in p,
                      (toc_table_i or toc_title_i) + 1)
 chap_i = find_idx(lambda p: '<hp:t>Ⅰ</hp:t>' in p and 'numberingType="TABLE"' in p,
@@ -430,27 +478,113 @@ for k, v in items:
         m = CH_RE.match(v.strip())
         if m:
             chaps.append((m.group(1), m.group(2)))
-toc_head = ''.join(tpl[toc_title_i:toc_table_i]) if toc_table_i else ''
-if toc_table_i is not None:
-    p_toc = tpl[toc_table_i]
-    subl = p_toc.index('<hp:subList'); oe = p_toc.index('>', subl)+1
-    cl = p_toc.index('</hp:subList>', oe)
-    entries = ''
-    # 목차 항목 char/para 재사용: 원본 첫 항목에서 추출
-    ecm = re.search(r'<hp:run charPrIDRef="(\d+)"><hp:t>Ⅰ</hp:t></hp:run>'
-                    r'<hp:run charPrIDRef="(\d+)"', p_toc)
-    rc, tc = (ecm.group(1), ecm.group(2)) if ecm else ('26', '34')
-    pm = re.search(r'<hp:p id="[^"]*" paraPrIDRef="(\d+)"[^>]*>\s*<hp:run charPrIDRef="%s"><hp:t>Ⅰ' % rc, p_toc)
-    ep = pm.group(1) if pm else '34'
-    for rn, ti in chaps:
-        entries += (f'<hp:p id="{uid()}" paraPrIDRef="{ep}" styleIDRef="0" pageBreak="0" '
-                    f'columnBreak="0" merged="0"><hp:run charPrIDRef="{rc}"><hp:t>{rn}</hp:t></hp:run>'
-                    f'<hp:run charPrIDRef="{tc}"><hp:t>. {esc(ti)}</hp:t></hp:run>{lineseg(2100)}</hp:p>')
-    entries += (f'<hp:p id="{uid()}" paraPrIDRef="{ep}" styleIDRef="0" pageBreak="0" columnBreak="0" '
-                f'merged="0"><hp:run charPrIDRef="{tc}"><hp:t> 참고자료</hp:t></hp:run>{lineseg(2100)}</hp:p>')
-    toc = toc_head + p_toc[:oe] + entries + p_toc[cl:]
-else:
+# 항목 표를 못 찾아도 목차 '제목' 문단은 살린다(예전엔 통째로 사라졌다).
+toc_head = ''.join(tpl[toc_title_i:toc_table_i]) if toc_table_i is not None \
+    else ''.join(tpl[toc_title_i:toc_title_i + 1])
+
+# 목차 항목을 넣을 '칸'을 고른다. 첫 <hp:subList>를 그냥 쓰면 장식용 얇은 칸에
+# 걸릴 수 있으므로(→ 세로 폭발) 표에서 가장 넓은 칸을 고르고, 그 폭이 아래 기준에
+# 미달하면 항목 삽입을 아예 포기한다(템플릿 목차를 그대로 남김).
+TOC_MIN_CELL_W = 10000          # 절대 최소 폭(HWPUNIT, ≈35mm)
+TOC_MIN_CELL_RATIO = 0.5        # 표 전체 폭 대비 최소 비율
+
+def pick_toc_cell(p):
+    """항목을 넣을 셀 구간과 폭을 고른다. 부적합하면 (None, 이유)."""
+    tw = re.search(r'<hp:sz width="(\d+)"', p)
+    tw = int(tw.group(1)) if tw else 0
+    best = None
+    for s, e in split_cells(p):
+        m = re.search(r'<hp:cellSz width="(\d+)" height="(\d+)"/>', p[s:e])
+        if not m or '<hp:subList' not in p[s:e]:
+            continue
+        w = int(m.group(1))
+        if best is None or w > best[2]:
+            best = (s, e, w)
+    if best is None:
+        return None, '삽입 가능한 셀 없음'
+    if best[2] < TOC_MIN_CELL_W or (tw and best[2] < tw * TOC_MIN_CELL_RATIO):
+        return None, f'가장 넓은 셀 폭 {best[2]}(표 폭 {tw})이 기준 미달'
+    return best, None
+
+toc_note = ''
+if toc_table_i is None:
     toc = toc_head
+    toc_note = '항목 표 미탐지 → 목차 항목 생략'
+else:
+    p_toc = tpl[toc_table_i]
+    cell, why = pick_toc_cell(p_toc)
+    if cell is None:
+        toc = toc_head + p_toc                    # 표를 훼손하지 않고 그대로 둔다
+        toc_note = f'{why} → 목차 항목 생략'
+    else:
+        cs, ce, cw = cell
+        inner = p_toc[cs:ce]
+        oe = inner.index('>', inner.index('<hp:subList')) + 1
+        cl = inner.index('</hp:subList>', oe)
+        old_paras = split_paras(inner[oe:cl])
+
+        # 항목 문단모양/글자모양은 템플릿의 기존 목차 항목에서 가져온다(하드코딩 없음).
+        ep = rc = tc = None
+        for q in old_paras:
+            runs = re.findall(r'<hp:run charPrIDRef="(\d+)"[^>]*>(.*?)</hp:run>', q, re.S)
+            heads = [(c, ''.join(re.findall(r'<hp:t>([^<]*)</hp:t>', b))) for c, b in runs]
+            if heads and heads[0][1].strip() in ('Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ'):
+                ep = re.search(r'paraPrIDRef="(\d+)"', q).group(1)
+                rc = heads[0][0]
+                tc = heads[1][0] if len(heads) > 1 else rc
+                break
+        if ep is None and old_paras:               # 항목 예시가 없는 템플릿
+            ep = re.search(r'paraPrIDRef="(\d+)"', old_paras[0]).group(1)
+            cm = re.search(r'charPrIDRef="(\d+)"', old_paras[0])
+            rc = tc = cm.group(1) if cm else BODY['char']
+        if ep is None:
+            ep, rc, tc = BODY['para'], BODY['char'], BODY['char']
+
+        # 줄 높이는 글자 크기 × 줄간격에서 산출한다(고정값 2100 금지).
+        eh = char_height(hdr, tc) or char_height(hdr, rc) or 1500
+        pct = line_spacing_pct(hdr, ep)
+        evs = max(900, eh)
+        gap_prev, gap_next = para_gap(hdr, ep)
+        # 한 항목이 차지하는 실제 높이: 줄높이 + 줄간격 초과분 + 문단 위/아래 간격
+        per = evs + max(0, int(evs * (pct - 100) / 100)) + max(0, gap_prev) + max(0, gap_next)
+
+        toc_items = [(rn, f'. {ti}') for rn, ti in chaps]
+        # '참고자료'는 원고에 실제로 있을 때만 넣는다(없으면 빈 항목이 남아 목차가 길어짐).
+        if any(k == 'p' and v.strip() == '참고자료' for k, v in items):
+            toc_items.append(('', ' 참고자료'))
+
+        entries = ''
+        for rn, ti in toc_items:
+            runs = ''
+            if rn:
+                runs += f'<hp:run charPrIDRef="{rc}"><hp:t>{esc(rn)}</hp:t></hp:run>'
+            runs += f'<hp:run charPrIDRef="{tc}"><hp:t>{esc(ti)}</hp:t></hp:run>'
+            entries += (f'<hp:p id="{uid()}" paraPrIDRef="{ep}" styleIDRef="0" pageBreak="0" '
+                        f'columnBreak="0" merged="0">{runs}{lineseg(evs)}</hp:p>')
+
+        new_inner = inner[:oe] + entries + inner[cl:]
+        # 항목 수가 줄었는데 템플릿의 셀/표 높이를 그대로 두면 빈 공간이 그만큼 남는다.
+        # → 내용 높이로 다시 계산해 셀·표 높이와 문단 레이아웃 캐시를 갱신한다.
+        cmarg = re.search(r'<hp:cellMargin left="\d+" right="\d+" top="(\d+)" bottom="(\d+)"/>', inner)
+        pad = (int(cmarg.group(1)) + int(cmarg.group(2))) if cmarg else 282
+        need = max(per, per * len(toc_items)) + pad
+        new_inner = re.sub(r'(<hp:cellSz width="\d+" height=")\d+(")',
+                           lambda m: m.group(1) + str(need) + m.group(2), new_inner, count=1)
+        toc_tbl = p_toc[:cs] + new_inner + p_toc[ce:]
+        # 같은 행의 다른 칸(장식 칸)도 행 높이를 맞춰야 표가 어긋나지 않는다.
+        toc_tbl = re.sub(r'(<hp:cellSz width="\d+" height=")\d+(")',
+                         lambda m: m.group(1) + str(need) + m.group(2), toc_tbl)
+        toc_tbl = re.sub(r'(<hp:sz width="\d+" widthRelTo="ABSOLUTE" height=")\d+(")',
+                         lambda m: m.group(1) + str(need) + m.group(2), toc_tbl, count=1)
+        # 표를 감싼 문단의 구(舊) linesegarray는 제거 후 새 높이로 다시 넣는다.
+        # (한글 2024가 낡은 캐시를 신뢰해 재계산을 반복하면 멈춤/과대 높이가 발생한다)
+        tbl_end = toc_tbl.rindex('</hp:tbl>') + len('</hp:tbl>')
+        toc_tbl = (toc_tbl[:tbl_end]
+                   + re.sub(r'<hp:linesegarray>.*?</hp:linesegarray>', lineseg(need),
+                            toc_tbl[tbl_end:], flags=re.S))
+        toc = toc_head + toc_tbl
+        toc_note = (f'셀폭 {cw}, 항목 {len(toc_items)}개, paraPr {ep}/charPr {rc},{tc}, '
+                    f'줄높이 {evs}(x{pct}%), 표높이 {need}')
 
 divider = ''
 if divider_i is not None:
@@ -527,3 +661,4 @@ print("OK ->", args.out)
 print("markers->style:", {k: v['sid'] for k, v in MARKERS.items()},
       "| body:", BODY['sid'], "| caption:", CAPTION['sid'])
 print("bullet-fixed paraPr:", sorted(FIX_PARAS), "| images:", len(IMG_ITEMS), "| chapters:", len(chaps))
+print(f"toc: 제목문단 {toc_title_i}, 항목표 {toc_table_i} | {toc_note}")
