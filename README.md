@@ -13,6 +13,15 @@
   - 핵심요지 손실 없는 고밀도 요약
   - Status / Log / Diff / Branch / Tag 문서 이력 관리 지원
 
+### 2. HWPX Report Brief (`hwpx-report-brief`)
+- **설명**: 한컴 HWPX 템플릿의 '스타일'(□·ㅇ·-·※·* 개요, 본문, 표/그림 제목 등)을 그대로 물려받아 한글(.hwpx) 공공기관 보고서를 생성하는 스킬. 파이썬으로 XML을 직접 생성하므로 한글 프로그램 없이 동작한다.
+- **위치**: [`hwpx-report-brief`](./hwpx-report-brief) 또는 [`hwpx-report-brief/SKILL.md`](./hwpx-report-brief/SKILL.md)
+- **주요 기능**:
+  - 번들 템플릿(`assets/template.hwpx`, 지방공기업평가원 기본 보고서 양식) 스타일 상속 — 한글에서 스타일만 고쳐 저장하면 다음 생성부터 반영
+  - 개요 스타일을 **자동 글머리표 문자**로 매칭(스타일 이름·ID가 바뀌어도 안전)
+  - `.docx`/`.txt`/`.md` 원고 → 표지·목차·장 번호박스·표·그림까지 조판
+  - 생성물 구조 검증기 동봉 (`references/verify.py`)
+
 ---
 
 ## 🛠️ 스킬 사용 방법
