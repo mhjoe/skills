@@ -12,7 +12,8 @@ build_hwpx.py — 한컴 HWPX 템플릿의 '스타일'을 그대로 물려받아
 
 입력(content)은 .docx(권장) 또는 .txt/.md. 문단 규칙:
   Ⅰ. / 1.            → 장/절 제목
-  □ ◯ ― ※ 로 시작    → 해당 개요 스타일
+  □ ◯ ― ※ 로 시작    → 해당 개요 스타일(※는 -의 바로 하위 단계)
+  * 로 시작           → 직전 문단의 위첨자 * 용어·문장에 대한 선택적 부연설명
   [그림 N] ...        → 그림 캡션 + 그림N_*.png 삽입
   [표 N] ...          → 표 캡션 (뒤따르는 docx 표가 한글 표로 변환)
   출처:/자료:         → 캡션(작은 글씨)
@@ -373,6 +374,7 @@ def build_table(rows):
 
 # ---------------------------------------------------------------- read content
 def read_items(path):
+    """(종류, 내용, 직전 * 부연설명의 근거가 되는 위첨자 표시 여부) 목록을 읽는다."""
     ext = os.path.splitext(path)[1].lower()
     if ext == '.docx':
         import docx
@@ -384,12 +386,23 @@ def read_items(path):
         out = []
         for ch in d.element.body.iterchildren():
             if isinstance(ch, CT_P):
-                out.append(('p', Paragraph(ch, d).text))
+                p = Paragraph(ch, d)
+                # '*' 부연설명 스타일은 직전 문단에 실제 위첨자 *가 있을 때만 허용한다.
+                has_sup_star = any('*' in run.text and run.font.superscript is True
+                                   for run in p.runs)
+                out.append(('p', p.text, has_sup_star))
             elif isinstance(ch, CT_Tbl):
-                out.append(('t', [[c.text.strip() for c in row.cells] for row in Table(ch, d).rows]))
+                out.append(('t', [[c.text.strip() for c in row.cells]
+                                  for row in Table(ch, d).rows], False))
         return out
     else:
-        return [('p', ln) for ln in io.open(path, encoding='utf-8').read().splitlines()]
+        out = []
+        for ln in io.open(path, encoding='utf-8-sig').read().splitlines():
+            # 평문은 서식 정보를 담지 못하므로 '용어*'처럼 앞말에 붙은 별표를 위첨자 의도로 본다.
+            # 줄 첫머리 '* '는 부연설명 문단의 마커이므로 근거 표시로 세지 않는다.
+            has_sup_star = not ln.lstrip().startswith('*') and re.search(r'(?<=\S)\*', ln) is not None
+            out.append(('p', ln, has_sup_star))
+        return out
 
 items = read_items(args.content)
 
@@ -401,14 +414,16 @@ TAB_RE = re.compile(r'^\[표\s*\d+\]')
 # 표지 제목/부제 = 첫 두 문단(--title 우선)
 doc_title = args.title
 subtitle = None
-lead = [v for k, v in items if k == 'p' and v.strip()][:2]
+lead = [v for k, v, _ in items if k == 'p' and v.strip()][:2]
 if doc_title is None and lead:
     doc_title = lead[0]
 if len(lead) > 1:
     subtitle = lead[1]
 
 body = []
-for kind, val in items[2:]:
+style_warnings = []
+dash_context_active = False
+for item_i, (kind, val, has_sup_star) in enumerate(items[2:], start=2):
     if kind == 't':
         body.append(build_table(val)); continue
     t = val.strip()
@@ -417,6 +432,7 @@ for kind, val in items[2:]:
     if t.startswith('graph ') or t.startswith('sequenceDiagram') or t.startswith('autonumber'):
         continue
     if t == '참고자료':
+        dash_context_active = False
         body.append(chapter_box('', '참고자료')); continue
     mfig = FIG_RE.match(t)
     if mfig:
@@ -431,12 +447,33 @@ for kind, val in items[2:]:
         body.append(source_para(t)); continue
     mch = CH_RE.match(t)
     if mch:
+        dash_context_active = False
         body.append(chapter_box(mch.group(1), mch.group(2), first=(mch.group(1) == 'Ⅰ'))); continue
     msec = SEC_RE.match(t)
     if msec:
+        dash_context_active = False
         body.append(section_head(t)); continue
     mk = CANON.get(t[0])
     if mk in MARKERS:
+        if mk in ('□', '◯'):
+            dash_context_active = False
+        elif mk == '-':
+            dash_context_active = True
+        elif mk == '※' and not dash_context_active:
+            style_warnings.append(
+                f"원고 항목 {item_i + 1}: 상위 '-' 문단이 없어 "
+                "'※' 하위 계층 스타일을 적용하지 않음")
+            body.append(body_para(t))
+            continue
+        if mk == '*':
+            prev_is_anchor = (item_i > 0 and items[item_i - 1][0] == 'p'
+                              and items[item_i - 1][2])
+            if not prev_is_anchor:
+                style_warnings.append(
+                    f"원고 항목 {item_i + 1}: 직전 문단에 위첨자 * 표시가 없어 "
+                    "'*' 부연설명 스타일을 적용하지 않음")
+                body.append(body_para(t))
+                continue
         body.append(item_para(mk, t[1:].strip())); continue
     body.append(body_para(t))
 
@@ -473,7 +510,7 @@ if args.date:
 
 # 목차: 제목/표 재구성
 chaps = []
-for k, v in items:
+for k, v, _ in items:
     if k == 'p':
         m = CH_RE.match(v.strip())
         if m:
@@ -550,7 +587,7 @@ else:
 
         toc_items = [(rn, f'. {ti}') for rn, ti in chaps]
         # '참고자료'는 원고에 실제로 있을 때만 넣는다(없으면 빈 항목이 남아 목차가 길어짐).
-        if any(k == 'p' and v.strip() == '참고자료' for k, v in items):
+        if any(k == 'p' and v.strip() == '참고자료' for k, v, _ in items):
             toc_items.append(('', ' 참고자료'))
 
         entries = ''
@@ -662,3 +699,5 @@ print("markers->style:", {k: v['sid'] for k, v in MARKERS.items()},
       "| body:", BODY['sid'], "| caption:", CAPTION['sid'])
 print("bullet-fixed paraPr:", sorted(FIX_PARAS), "| images:", len(IMG_ITEMS), "| chapters:", len(chaps))
 print(f"toc: 제목문단 {toc_title_i}, 항목표 {toc_table_i} | {toc_note}")
+for warning in style_warnings:
+    print("WARNING:", warning)
