@@ -7,5 +7,9 @@ Desktop.ini
 *.tmp
 *.log
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Scratch directory
 scratch/

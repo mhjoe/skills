@@ -1,0 +1,245 @@
+---
+name: hwp-edit
+description: >-
+  이미 존재하는 한글 문서(.hwp/.hwpx)를 열어 텍스트를 읽고 수정하며, 특히 표로 된
+  양식의 빈 칸을 좌표로 정확히 채운다. 사용 시점: 사용자가 "한글 파일 읽어줘",
+  "이 hwpx에서 텍스트 뽑아줘", "이 문서에서 A를 B로 바꿔줘", "심사서/평가표/신청서
+  양식에 내용을 작성해줘", "표의 해당 칸에 체크해줘" 같은 요청을 할 때. 파이썬으로
+  내부 XML을 직접 파싱하므로 한글 프로그램이나 COM 없이 동작하고, 원본의 서식은
+  그대로 유지된다. 빈 문서에서 새 보고서를 생성하는 작업이 아니라 기존 문서를
+  편집하는 작업에 쓴다(새 보고서 생성은 hwpx-report-brief 스킬).
+---
+
+# 한글 문서 읽기 및 수정 (HWP/HWPX)
+
+기존 `.hwp`/`.hwpx` 문서를 열어 텍스트를 추출·검색·치환하고, **표 양식의 빈 셀을
+좌표로 지정해 채운다.** 파일 내부 XML을 직접 다루므로 한글 프로그램이 설치되어
+있지 않아도 되고, 글꼴·크기·색상 등 원본 서식은 보존된다.
+
+**이 스킬의 범위는 "기존 문서 편집"이다.** 템플릿 스타일을 물려받아 새 보고서를
+조판하는 작업은 `hwpx-report-brief` 스킬을 쓴다.
+
+## 언제 쓰나
+
+- 한글 문서의 내용을 읽어야 할 때 (Read 도구는 hwpx 바이너리를 파싱하지 못한다)
+- 문서 전체에서 특정 단어를 일괄 치환할 때
+- **심사서·평가표·신청서·점검표 같은 표 양식의 빈 칸을 채울 때** ← 이 스킬의 핵심
+
+## 전제 조건
+
+```bash
+pip install lxml
+```
+
+`scripts/hwp_handler.py`를 import 경로에 두고 사용한다.
+
+## 기본 사용
+
+### 텍스트 추출
+
+```python
+from hwp_handler import HwpDocument
+
+doc = HwpDocument("문서.hwpx")
+text = doc.get_text()
+doc.close()
+```
+
+### 검색 / 치환
+
+```python
+doc = HwpDocument("문서.hwpx")
+n = doc.count_text("위원회")
+doc.replace_text("회의", "미팅")
+doc.save()
+doc.close()
+```
+
+### 표(양식)에 기입 — 반드시 이 방법으로
+
+**표의 빈 칸을 채우는 데 `replace_text()`를 쓰면 안 된다.** 아래 "표 작업 규칙"을
+먼저 읽을 것.
+
+```python
+doc = HwpDocument("심사서식.hwpx")
+
+# 1단계: 좌표 확인 (생략 금지)
+print(doc.dump_tables())
+# ===== TABLE 4  rowCnt=15 colCnt=2 =====
+#   r3   [c0 1x1]'연구주제의 창의성' [c1 1x1]''   ← c1이 빈 답란
+
+# 2단계: 좌표로 기입. 리스트의 각 원소가 한글에서 한 문단(줄)이 된다.
+doc.set_cell_text(
+    4, 3, 1,                                 # 표4 / 행3 / colAddr=1
+    ["첫째 문단입니다.", "둘째 문단입니다."],
+    expect_label=(0, "연구주제의 창의성"),     # 같은 행 c0 라벨 검증
+)
+doc.set_cell_text(1, 2, 5, "○", expect_label=(1, "연구주제의 창의성"))
+
+doc.save()
+doc.close()
+```
+
+---
+
+## 표 작업 규칙 (중요)
+
+표 양식을 채우는 작업에서 반복적으로 발생하는 실패가 있다. 아래 세 가지를 지키지
+않으면 **내용이 엉뚱한 셀에 들어가거나, 한 줄로 뭉쳐 셀 밖으로 넘친다.**
+
+### 규칙 1 — 빈 셀은 텍스트 검색으로 찾을 수 없다
+
+빈 셀에는 `<hp:t>` 요소가 **아예 존재하지 않는다**:
+
+```xml
+<hp:tc>                          <!-- c0: 라벨 셀 -->
+  <hp:p><hp:run charPrIDRef="14"><hp:t>연구주제의 창의성</hp:t></hp:run></hp:p>
+<hp:tc>                          <!-- c1: 채워야 할 답란 -->
+  <hp:p><hp:run charPrIDRef="15"/></hp:p>     <!-- run이 self-closing -->
+```
+
+따라서 `if elem.text == "연구주제의 창의성"` 같은 검색은 **답란을 절대 찾지 못하고**,
+그 문자열이 실재하는 유일한 곳인 라벨 셀에 착지해 라벨을 덮어쓴다.
+
+- ❌ `doc.replace_text("주제", "주제\n" + 의견)`
+- ✅ `doc.set_cell_text(4, 3, 1, [의견], expect_label=(0, "연구주제의 창의성"))`
+
+`replace_text()`는 "문서 전체에서 단어 X를 Y로" 같은 용도에만 쓴다. 전역 치환이라
+의도치 않은 곳까지 함께 바꾼다(예: `replace_text("수정", "게재불가")`가 판정란 라벨과
+안내문의 "수정·보완사항"까지 훼손).
+
+### 규칙 2 — 줄바꿈은 `\n`이 아니라 문단이다
+
+HWPX에서 줄바꿈은 문자가 아니라 `<hp:p>` 경계다. `<hp:t>` 안의 `\n`은 XML 공백으로
+취급되어 **화면에 아무 효과가 없다**. 여러 줄은 리스트로 전달한다.
+
+- ❌ `set_cell_text(4, 3, 1, ["1문단\n2문단"])` → `ValueError`로 차단됨
+- ✅ `set_cell_text(4, 3, 1, ["1문단", "2문단"])`
+
+또한 `<hp:linesegarray>`는 **렌더링된 줄 수만큼의 레이아웃 캐시**다. 이걸 남긴 채
+텍스트만 길게 바꾸면 한글이 옛 줄 수대로 그려서 긴 문장이 한 줄로 셀 밖에 넘친다.
+`set_cell_text()`는 이 캐시를 제거해 한글이 재계산하도록 한다.
+
+### 규칙 3 — 좌표는 `dump_tables()`로 확인하고 `expect_label`로 검증한다
+
+`col`은 리스트 인덱스가 아니라 `<hp:cellAddr>`의 **`colAddr` 값**이다. 셀 병합
+(`colSpan`/`rowSpan`) 때문에 행마다 셀 개수가 다르고 colAddr도 건너뛴다.
+
+```
+r1  [c0]'평가항목' [c1]'세부항목' [c2 2x1]'A 아주 우수' [c4]'B 우수' [c5]'C 보통' ...
+r2  [c0 1x2]'주제' [c1]'연구주제의 창의성' [c2 2x1]'' [c4]'' [c5]'' ...
+r3            (c0 없음 — 위 행에 병합됨)  [c1]'연구목적의 타당성' ...
+```
+
+A열은 `colSpan=2`라 `c2`, B열은 `c4`, C열은 `c5`다. 인덱스로 세면 반드시 어긋난다.
+`expect_label=(라벨열, 기대문자열)`을 넘기면 기입 전에 같은 행의 라벨을 대조해
+좌표 착오를 즉시 잡아준다. **항상 사용할 것.**
+
+### 작업 순서
+
+1. `dump_tables()`로 표/행/`colAddr`을 확인한다
+2. 원본을 백업한다 (이미 편집한 파일 위에 덧쓰면 오류가 누적된다)
+3. `set_cell_text(..., expect_label=...)`로 기입한다
+4. 저장 후 `get_cell_text()`로 되읽어 검증한다
+5. 검증 결과를 사용자에게 보고한다
+
+**한 번 실패했다면 치환 문자열을 바꿔가며 재시도하지 말고 1번으로 돌아간다.**
+같은 잘못된 모델 위의 재시도는 파일 오염만 누적시킨다.
+
+---
+
+## API
+
+### 문서
+
+| 메서드 | 설명 |
+|---|---|
+| `HwpDocument(path, create_backup=True)` | 열기 |
+| `save(output_path=None)` | 저장 |
+| `close()` | 리소스 해제 (context manager 지원) |
+| `get_document_info()` / `get_style_info()` | 메타정보 |
+
+### 텍스트
+
+| 메서드 | 설명 |
+|---|---|
+| `get_text(start, length)` | 전체 또는 범위 텍스트 |
+| `get_char_count()` / `get_paragraph_count()` | 글자 수 / 문단 수 |
+| `find_all(text)` / `count_text(text)` | 검색 |
+| `replace_text(a, b)` / `replace_first(a, b)` | 치환 (**표 기입에는 사용 금지**) |
+
+### 표 (좌표 기반)
+
+| 메서드 | 설명 |
+|---|---|
+| `dump_tables()` | 모든 표의 행/`colAddr`/내용 출력 — **표 작업 전 필수** |
+| `get_tables()` | `<hp:tbl>` 엘리먼트 목록 |
+| `get_cell(t, r, c)` | 셀 엘리먼트 |
+| `get_cell_text(t, r, c)` | 셀 텍스트 (빈 셀은 `""`) |
+| `set_cell_text(t, r, c, paragraphs, expect_label=None)` | 셀 내용 교체 |
+
+## 파일 구조
+
+HWP/HWPX는 ZIP 아카이브다:
+
+```
+document.hwpx
+├── Contents/section0.xml   # 본문 (hwpx)
+├── Contents/header.xml     # 스타일
+└── content.xml             # 구형 hwp의 본문
+```
+
+본문의 계층:
+
+```
+hp:tbl (표)
+└── hp:tr (행)
+    └── hp:tc (셀) + hp:cellAddr(colAddr, rowAddr) + hp:cellSpan
+        └── hp:subList
+            └── hp:p (문단)          ← 줄바꿈 = 문단 하나
+                ├── hp:run
+                │   └── hp:t (텍스트) ← 빈 셀에는 이 요소가 없음
+                └── hp:linesegarray   ← 렌더링된 줄 수 캐시
+```
+
+자세한 내용은 [`references/hwpx-structure.md`](./references/hwpx-structure.md).
+
+## 문제 해결
+
+### `WinError 32` — 다른 프로세스가 파일을 사용 중
+
+한글에서 해당 문서를 열어둔 상태다. 어느 문서가 잠겨 있는지 먼저 확인한다:
+
+```powershell
+Get-Process Hwp | Select-Object Id, MainWindowTitle
+```
+
+`MainWindowTitle`에 파일명이 나온다. 사용자에게 그 문서를 닫아달라고 요청한다.
+**프로세스를 임의로 종료하면 사용자의 미저장 작업이 사라진다.**
+
+### 내용이 엉뚱한 셀에 들어감 / 한 줄로 뭉쳐 나옴
+
+표 작업에 `replace_text()`를 사용한 경우다. 위의 **표 작업 규칙** 참조.
+
+- 원인 1: 빈 셀에는 `<hp:t>`가 없어 텍스트 검색이 라벨 셀에 착지
+- 원인 2: `\n`은 줄바꿈이 아님 + `linesegarray` 캐시가 남아 한 줄로 렌더링
+- 복구: 오염된 파일 위에 재편집하지 말고 **백업에서 복원한 뒤** 좌표 기반으로 재작성
+
+### `content.xml을 찾을 수 없습니다`
+
+구형 `.hwp`와 `.hwpx`의 내부 경로가 다르다. 핸들러는 `content.xml`을 먼저 찾고
+없으면 `Contents/section0.xml`을 사용한다. 둘 다 없으면 손상되었거나 암호화된
+문서일 수 있다.
+
+### 텍스트가 제대로 추출되지 않음
+
+- 글상자·표 안의 텍스트는 문서 순서대로 이어져 나온다
+- 숨겨진 텍스트는 제외된다
+- 암호화된 문서는 처리할 수 없다
+
+## 제한사항
+
+- ❌ 암호화된 문서
+- ❌ 매크로
+- ⚠️ 매우 복잡한 표 구조에서 일부 기능 제한
+- ✅ 텍스트 읽기/수정, 표 셀 기입, 서식 유지, 자동 백업
