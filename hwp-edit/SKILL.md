@@ -7,7 +7,8 @@ description: >-
   양식에 내용을 작성해줘", "표의 해당 칸에 체크해줘" 같은 요청을 할 때. 파이썬으로
   내부 XML을 직접 파싱하므로 한글 프로그램이나 COM 없이 동작하고, 원본의 서식은
   그대로 유지된다. 빈 문서에서 새 보고서를 생성하는 작업이 아니라 기존 문서를
-  편집하는 작업에 쓴다(새 보고서 생성은 hwpx-report-brief 스킬).
+  편집하는 작업에 쓴다(새 보고서 생성은 hwpx-report-brief 스킬). 한글의 기본
+  저장 형식인 바이너리 .hwp는 COM으로 .hwpx 변환 후 동일하게 처리한다.
 ---
 
 # 한글 문서 읽기 및 수정 (HWP/HWPX)
@@ -28,10 +29,50 @@ description: >-
 ## 전제 조건
 
 ```bash
-pip install lxml
+uv run --python 3.12 --link-mode=copy --with lxml python 작업스크립트.py
 ```
 
 `scripts/hwp_handler.py`를 import 경로에 두고 사용한다.
+
+**`pip install lxml`을 쓰지 말 것.** Python이 uv로 관리되는 환경에서는
+`This Python installation is managed by uv`로 실패하며, `pip` 명령 자체가 없을
+수도 있다. `--link-mode=copy`는 uv 캐시의 `액세스가 거부되었습니다 (os error 5)`를
+예방한다(백신·동기화 폴더 간섭).
+
+## 0단계 — 이 파일이 XML로 열리는가 (생략 금지)
+
+`.hwp` 확장자는 **서로 다른 두 포맷**을 가리킨다. 확장자로는 구분할 수 없으므로
+파일 시그니처를 먼저 본다.
+
+```python
+from hwp_com import detect_format, to_hwpx
+
+fmt = detect_format("문서.hwp")     # 'zip' | 'ole' | 'unknown'
+path = to_hwpx("문서.hwp")          # 'ole'이면 변환, 'zip'이면 원본 경로 그대로
+```
+
+| 시그니처 | 포맷 | 처리 |
+|---|---|---|
+| `PK\x03\x04` | ZIP (.hwpx, HWPML로 저장된 .hwp) | 그대로 `HwpDocument`로 |
+| `\xd0\xcf\x11\xe0` | OLE — **바이너리 .hwp v5 (한글 기본 저장 형식)** | `to_hwpx()`로 변환 후 진행 |
+
+바이너리 `.hwp`를 그대로 `HwpDocument()`에 넘기면 이렇게 실패한다:
+
+```
+ValueError: 잘못된 HWP 파일 형식입니다: ...\문서.hwp
+```
+
+**이건 파일이 손상됐다는 뜻이 아니다.** ZIP으로 열려다 실패한 것뿐이므로
+사용자에게 "손상된 문서"라고 보고하지 말고 `to_hwpx()`로 변환한다.
+변환에는 한글 프로그램이 필요하다(COM). 자세한 내용과 함정은
+[`references/com-automation.md`](./references/com-automation.md).
+
+```bash
+uv run --python 3.12 --link-mode=copy --with pywin32 --with lxml python 작업스크립트.py
+```
+
+변환 후에는 **평소대로 XML 경로로 작업한다.** COM으로 직접 편집하지 말 것 —
+느리고 함정이 많다. COM은 변환·PDF 내보내기 등 XML로 불가능한 작업에만 쓴다.
 
 ## 기본 사용
 
@@ -225,11 +266,26 @@ Get-Process Hwp | Select-Object Id, MainWindowTitle
 - 원인 2: `\n`은 줄바꿈이 아님 + `linesegarray` 캐시가 남아 한 줄로 렌더링
 - 복구: 오염된 파일 위에 재편집하지 말고 **백업에서 복원한 뒤** 좌표 기반으로 재작성
 
+### `잘못된 HWP 파일 형식입니다`
+
+**거의 항상 바이너리 `.hwp` v5다. 손상된 파일이 아니다.** 위의 **0단계**를
+건너뛴 경우다. `to_hwpx()`로 변환한 뒤 다시 시도한다.
+
 ### `content.xml을 찾을 수 없습니다`
 
 구형 `.hwp`와 `.hwpx`의 내부 경로가 다르다. 핸들러는 `content.xml`을 먼저 찾고
 없으면 `Contents/section0.xml`을 사용한다. 둘 다 없으면 손상되었거나 암호화된
 문서일 수 있다.
+
+### COM 스크립트가 아무 출력 없이 멈춤
+
+`RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule')`을 `Open`/`SaveAs`
+이전에 호출하지 않았다. 한글이 **보이지 않는** 보안 승인 대화상자를 띄우고
+영구 대기한다. `hwp_com.HwpApp`은 이를 자동 처리한다.
+
+`Quit()` 직후 새 `Dispatch()`를 호출해도 같은 증상이 난다 — 한 인스턴스를
+재사용할 것. **Hwp 프로세스를 반복 강제 종료하면 COM이 통째로 응답 불능이 된다.**
+복구하려면 사용자에게 한글을 직접 한 번 실행했다 닫아달라고 요청한다.
 
 ### 텍스트가 제대로 추출되지 않음
 
@@ -242,4 +298,8 @@ Get-Process Hwp | Select-Object Id, MainWindowTitle
 - ❌ 암호화된 문서
 - ❌ 매크로
 - ⚠️ 매우 복잡한 표 구조에서 일부 기능 제한
+- ⚠️ 바이너리 `.hwp`는 한글 설치 필요 (변환에만; 변환 후 작업은 한글 없이 가능)
+- ⚠️ 한컴 Assistant MCP 서버는 호출 앱을 검사해 에이전트를 거부한다 — 쓰지 말 것
+  (자세한 내용은 [`references/com-automation.md`](./references/com-automation.md))
 - ✅ 텍스트 읽기/수정, 표 셀 기입, 서식 유지, 자동 백업
+- ✅ COM 폴백으로 `.hwp` ↔ `.hwpx` 변환, PDF 내보내기
