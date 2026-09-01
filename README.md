@@ -36,6 +36,16 @@
   - 실행은 `pip`가 아닌 `uv run --with` (uv 관리 환경에서 `pip install`은 실패)
 - **`hwpx-report-brief`와의 구분**: 이 스킬은 **기존 문서 편집**, `hwpx-report-brief`는 **새 보고서 생성**이다.
 
+### 4. Book Translation (`book-translation`)
+- **설명**: 외국어 원서 PDF를 챕터별로 분리해 한국어로 **완역**하고, 작품마다 서지 정보·등장인물·심층 해설을 붙여 마크다운으로 남기는 스킬. 요약본이 아닌 전편 완역이 목표일 때 쓴다. 실제 완역 프로젝트(단편집 2종, 원문 약 39만 단어)에서 뽑아낸 절차다.
+- **위치**: [`book-translation`](./book-translation) 또는 [`book-translation/SKILL.md`](./book-translation/SKILL.md)
+- **주요 기능**:
+  - PDF → 내장 TOC 확인 → 챕터별 원문 `.txt` 덤프까지 3단 파이프라인 (`scripts/`)
+  - **축약 자동 검출** (`scripts/verify.py`) — 한글 글자수 ÷ 원문 단어수 비율에 문장 수·인용부호 수 대조를 더해 판정. 완역본은 오탐하지 않으면서, 대화가 증발한 축약본은 ratio 1.5~1.7 / quote 1~30%의 지문으로 걸러낸다
+  - 작품 파일·색인 README 템플릿과 심층 해설 작성 기준 (`references/format.md`)
+  - 완역 원칙, 문체·강조·인용 표기, 역주를 붙일 곳과 붙이지 않을 곳 (`references/style.md`)
+  - 번역문을 스크립트로 조립하다 축약본을 낳은 실패 사례를 절차에 반영 — 원문은 읽고, 마크다운은 직접 쓴다
+
 ---
 
 ## 🛠️ 스킬 사용 방법
