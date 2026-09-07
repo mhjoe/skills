@@ -23,6 +23,7 @@ DLL이 없는 새 환경에서는 uv로 일회성 환경에 pyhwpx를 받아 DLL
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 from pathlib import Path
@@ -30,7 +31,7 @@ from pathlib import Path
 __all__ = [
     "detect_format", "needs_conversion", "ensure_security_module",
     "security_module_status", "fetch_dll", "HwpSecurityModuleError",
-    "HwpApp", "shared_app", "to_hwpx", "to_hwp", "to_pdf", "get_text",
+    "HwpApp", "shared_app", "open_format", "to_hwpx", "to_hwp", "to_pdf", "get_text",
 ]
 
 ZIP_SIG = b"PK\x03\x04"
@@ -338,8 +339,13 @@ class HwpApp:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    def open(self, path: str | os.PathLike, fmt: str = "HWP") -> None:
-        self.hwp.Open(str(Path(path).resolve()), fmt, "forceopen:true")
+    def open(self, path: str | os.PathLike, fmt: str | None = None) -> None:
+        """문서를 연다. fmt를 생략하면 파일 시그니처에서 유도한다.
+
+        fmt를 틀리면(예: .hwpx를 'HWP'로) 한글이 오류 없이 빈 문서를 연다.
+        """
+        full = str(Path(path).resolve())
+        self.hwp.Open(full, fmt or open_format(full), "forceopen:true")
 
     def save_as(self, path: str | os.PathLike, fmt: str = "HWPX") -> str:
         out = str(Path(path).resolve())
@@ -391,16 +397,34 @@ def close_shared() -> None:
         _SHARED = None
 
 
+# 호출자가 close_shared()를 잊어도 창 제목 없는 한글 인스턴스가 남지 않게 한다.
+# 남으면 열어둔 파일을 계속 잠그고, 사용자가 원인을 찾기 어렵다.
+atexit.register(close_shared)
+
+
 # --------------------------------------------------------------------------
 # 편의 함수
 # --------------------------------------------------------------------------
+
+def open_format(path: str | os.PathLike) -> str:
+    """Open()에 넘길 소스 포맷을 파일 시그니처에서 유도한다.
+
+    .hwpx를 fmt='HWP'로 열면 한글이 **오류 없이 빈 문서를 연다.** 그대로
+    SaveAs하면 내용이 사라진 파일이 조용히 만들어진다 - 확장자만 믿지 말 것.
+    """
+    return "HWPX" if detect_format(path) == "zip" else "HWP"
+
 
 def _convert(src, dst, src_fmt, dst_fmt) -> str:
     # 인스턴스를 매번 새로 만들지 않는다 — Quit 직후 Dispatch가 영구 정지하고,
     # 인스턴스마다 RegisterModule을 다시 해야 한다. shared_app()이 둘 다 처리한다.
     app = shared_app()
     app.open(src, src_fmt)
-    return app.save_as(dst, dst_fmt)
+    out = app.save_as(dst, dst_fmt)
+    # 저장 직후 문서를 비운다. 안 비우면 한글이 결과 파일을 계속 열고 있어서
+    # 곧바로 그 파일을 편집하려는 hwp_handler가 WinError 32로 막힌다.
+    app.clear()
+    return out
 
 
 def to_hwpx(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str:
@@ -412,7 +436,7 @@ def to_hwpx(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str
     if detect_format(src) == "zip":
         return str(src)
     dst = Path(dst) if dst else src.with_suffix(".hwpx")
-    return _convert(src, dst, "HWP", "HWPX")
+    return _convert(src, dst, open_format(src), "HWPX")
 
 
 def to_hwp(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str:
@@ -420,21 +444,23 @@ def to_hwp(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str:
     꼭 필요할 때만 쓰고, 사용자에게 알린다."""
     src = Path(src)
     dst = Path(dst) if dst else src.with_suffix(".hwp")
-    return _convert(src, dst, "HWP", "HWP")
+    return _convert(src, dst, open_format(src), "HWP")
 
 
 def to_pdf(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str:
     """PDF로 내보낸다. XML 경로로는 불가능한 작업이다."""
     src = Path(src)
     dst = Path(dst) if dst else src.with_suffix(".pdf")
-    return _convert(src, dst, "HWP", "PDF")
+    return _convert(src, dst, open_format(src), "PDF")
 
 
 def get_text(src: str | os.PathLike) -> str:
     """포맷과 무관하게 텍스트를 추출한다(바이너리 .hwp 포함)."""
     app = shared_app()
     app.open(src)
-    return app.text()
+    text = app.text()
+    app.clear()          # 원본 파일을 계속 열어두지 않는다
+    return text
 
 
 def _print_status() -> bool:

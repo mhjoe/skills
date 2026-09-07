@@ -184,7 +184,7 @@ class HwpDocument:
         Returns:
             바뀐 개수
         """
-        if not self.root:
+        if self.root is None:
             return 0
 
         replaced_count = 0
@@ -208,7 +208,7 @@ class HwpDocument:
         Returns:
             성공 여부
         """
-        if not self.root:
+        if self.root is None:
             return False
 
         for elem in self.root.iter():
@@ -408,7 +408,9 @@ class HwpDocument:
         # 백업 생성 (필요한 경우)
         if self.create_backup and output_path is None and self.backup_path is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.backup_path = self.file_path.parent / f"{self.file_path.stem}.backup_{timestamp}.hwp"
+            # 확장자를 하드코딩하면 .hwpx를 편집할 때 ZIP 파일에 .hwp 이름이 붙는다.
+            suffix = self.file_path.suffix or ".hwpx"
+            self.backup_path = self.file_path.parent / f"{self.file_path.stem}.backup_{timestamp}{suffix}"
             shutil.copy2(self.file_path, self.backup_path)
             print(f"백업 파일 생성: {self.backup_path}")
 

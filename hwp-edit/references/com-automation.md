@@ -210,6 +210,22 @@ h.Clear(1)
 h.Open(다음파일, 'HWP', 'forceopen:true')
 ```
 
+### `Open`의 포맷을 틀리면 오류 없이 빈 문서가 열린다
+
+가장 위험한 함정이다. **예외도, 경고도 없다.**
+
+```python
+h.Open('문서.hwpx', 'HWP', 'forceopen:true')    # 텍스트 0자
+h.Open('문서.hwpx', 'HWPX', 'forceopen:true')   # 정상
+```
+
+그 상태로 `SaveAs`하면 **내용이 사라진 파일이 조용히 만들어진다.** 파일 크기도
+그럴듯하고(빈 문서에도 서식·메타데이터가 있다) 확장자도 맞아서, 존재 여부만
+확인하는 검증은 통과한다. 변환 결과는 **크기가 아니라 텍스트로** 확인할 것.
+
+`hwp_com.open_format()`이 파일 시그니처에서 포맷을 유도한다. `HwpApp.open()`과
+`to_hwpx`/`to_hwp`/`to_pdf`는 이걸 쓴다 — 확장자를 믿지 않는다.
+
 ### 텍스트 추출에 `InitScan`/`GetText` 루프를 쓰지 말 것
 
 `GetText()`가 종료 상태를 반환하지 않아 **무한 루프**에 빠진다.
