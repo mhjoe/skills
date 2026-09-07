@@ -74,6 +74,69 @@ uv run --python 3.12 --link-mode=copy --with pywin32 --with lxml python 작업�
 변환 후에는 **평소대로 XML 경로로 작업한다.** COM으로 직접 편집하지 말 것 —
 느리고 함정이 많다. COM은 변환·PDF 내보내기 등 XML로 불가능한 작업에만 쓴다.
 
+### COM을 쓸 때의 절대 규칙 — `RegisterModule` 먼저
+
+`RegisterModule` 없이 `Open()`이나 `SaveAs()`를 호출하면 한글이 **파일마다,
+저장마다** 이 대화상자를 띄운다:
+
+> 한글을 이용하여 위 파일에 접근하려는 시도(파일의 손상 또는 유출의 위험 등)가
+> 있습니다. 정상적인 작업 과정에만 접근을 허용하십시오.
+> `[접근 허용]` `[모두 허용]` `[허용 안 함]` `[모두 안 함]`
+
+사용자가 매번 클릭해야 하고, 한글 창이 숨겨져 있으면 **화면에 보이지도 않는 채로**
+떠서 스크립트가 영구 정지한다. 대화상자에서 "모두 허용"을 눌러도 다음 실행에 또 뜬다 —
+근본 해결은 등록뿐이다.
+
+**`scripts/hwp_com.py`가 있으면 그것만 쓴다.** `HwpApp`이 등록·검증을 모두 처리하고,
+등록이 안 된 상태면 `Open` 이전에 예외를 던져 대화상자 앞에서 멈추는 일을 막는다.
+
+```python
+from hwp_com import to_hwpx, to_pdf, shared_app, close_shared
+```
+
+**`scripts/`가 없어서 COM 코드를 직접 써야 한다면, 아래 두 부분을 반드시 포함한다.**
+한 줄이라도 빠지면 대화상자가 뜬다.
+
+```python
+import os, shutil, winreg
+from pathlib import Path
+import win32com.client as w
+
+# (1) 보안 모듈 DLL 등록 — 한 번만 하면 영구히 유지된다
+dll = Path(os.environ["LOCALAPPDATA"]) / "HwpAutomation" / "FilePathCheckerModule.dll"
+if not dll.exists():                      # DLL은 pyhwpx 패키지에 동봉되어 있다
+    import pyhwpx                         #   → 실행에 --with pyhwpx 를 추가할 것
+    dll.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(pyhwpx.__file__).parent / "FilePathCheckerModule.dll", dll)
+for key in (r"Software\HNC\HwpAutomation\Modules",
+            r"Software\Hnc\HwpUserAction\Modules"):
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key, 0, winreg.KEY_WRITE) as k:
+        winreg.SetValueEx(k, "FilePathCheckerModule", 0, winreg.REG_SZ, str(dll))
+
+# (2) 인스턴스마다, Open/SaveAs 이전에 호출 — 반환값이 False면 진행하지 말 것
+hwp = w.Dispatch("HWPFrame.HwpObject")
+if not hwp.RegisterModule("FilePathCheckDLL", "FilePathCheckerModule"):
+    raise RuntimeError(f"보안 모듈 등록 실패: {dll} — 이대로 진행하면 대화상자가 뜬다")
+```
+
+DLL 확보가 필요하면 실행 명령에 `--with pyhwpx`를 붙인다. **한 번만** 필요하다:
+
+```bash
+# 등록 후 상태 출력 (DLL 확보가 필요할 때. 이후 실행에는 pyhwpx가 필요 없다)
+uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python scripts/hwp_com.py --setup
+
+# 등록 상태만 확인
+uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --check
+```
+
+PowerShell에서는 `New-Object -ComObject`를 직접 쓰지 말고
+`scripts/hwp-helper.ps1`의 `New-HwpObject`를 쓴다(등록을 대신 처리한다).
+`Hancom.HwpObject`는 **존재하지 않는 ProgID다** — `HWPFrame.HwpObject`를 쓴다.
+
+인스턴스를 여러 번 만들지 않는다. `Quit()` 직후 새 `Dispatch()`는 영구 정지하고,
+새 인스턴스마다 `RegisterModule`을 다시 해야 한다. 여러 파일을 처리할 때는
+`shared_app()`을 쓰거나 `Clear(1)` 후 같은 인스턴스를 재사용한다.
+
 ## 기본 사용
 
 ### 텍스트 추출
@@ -277,11 +340,39 @@ Get-Process Hwp | Select-Object Id, MainWindowTitle
 없으면 `Contents/section0.xml`을 사용한다. 둘 다 없으면 손상되었거나 암호화된
 문서일 수 있다.
 
-### COM 스크립트가 아무 출력 없이 멈춤
+### 보안 승인 대화상자가 뜬다 (또는 스크립트가 아무 출력 없이 멈춤)
+
+> 한글을 이용하여 위 파일에 접근하려는 시도(파일의 손상 또는 유출의 위험 등)가
+> 있습니다. `[접근 허용]` `[모두 허용]` `[허용 안 함]` `[모두 안 함]`
 
 `RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule')`을 `Open`/`SaveAs`
-이전에 호출하지 않았다. 한글이 **보이지 않는** 보안 승인 대화상자를 띄우고
-영구 대기한다. `hwp_com.HwpApp`은 이를 자동 처리한다.
+이전에 호출하지 않았다. 한글 창이 보이면 대화상자가 파일마다 뜨고, 숨겨져 있으면
+**보이지 않는 채로** 떠서 스크립트가 영구 대기한다. 같은 원인, 같은 해결이다.
+
+대화상자에서 "모두 허용"을 눌러도 다음 실행에 또 뜬다. 근본 해결은 등록뿐이다.
+
+1. 등록 상태를 먼저 확인한다:
+
+   ```bash
+   uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --check
+   ```
+
+   `등록 완료`가 나오는데도 대화상자가 뜬다면, **`RegisterModule`을 부르지 않는
+   코드가 섞여 있다는 뜻이다.** 직접 작성한 COM 스니펫이나
+   `New-Object -ComObject`를 찾아 위의 "COM을 쓸 때의 절대 규칙"대로 고친다.
+
+2. `미등록`이면 한 번만 등록한다(영구히 유지된다):
+
+   ```bash
+   uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python scripts/hwp_com.py --setup
+   ```
+
+3. `RegisterModule` 자체가 `False`를 반환하면 DLL 로드 실패다. 한글과 DLL의
+   **비트수가 같아야 한다** — 한글이 32비트(`C:\Program Files (x86)\Hnc\...`)면
+   DLL도 32비트여야 한다. `regsvr32`로는 등록되지 않는다(`DllRegisterServer` 없음).
+
+`hwp_com.HwpApp`은 이 전 과정을 자동 처리하고, 등록이 안 된 상태면 `Open` 이전에
+`HwpSecurityModuleError`를 던져 대화상자 앞에서 멈추는 일을 막는다.
 
 `Quit()` 직후 새 `Dispatch()`를 호출해도 같은 증상이 난다 — 한 인스턴스를
 재사용할 것. **Hwp 프로세스를 반복 강제 종료하면 COM이 통째로 응답 불능이 된다.**

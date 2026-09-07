@@ -81,32 +81,96 @@ uv run --python 3.12 --link-mode=copy --with lxml   python 스크립트.py   # X
 `--link-mode=copy`가 없으면 uv 캐시에서 `액세스가 거부되었습니다 (os error 5)`가
 날 수 있다(백신·동기화 폴더 간섭). 붙여두는 편이 안전하다.
 
-### 2. 보안 모듈 등록 — 생략하면 반드시 멈춘다
+### 2. 보안 모듈 등록 — 생략하면 대화상자가 뜨거나 멈춘다
 
-`RegisterModule` 없이 `Open()`이나 `SaveAs()`를 호출하면 한글이 **보이지 않는**
-보안 승인 대화상자를 띄우고 스크립트가 **영구 정지**한다. 화면에 아무것도 안 보여서
-원인을 찾기 어렵다.
+`RegisterModule` 없이 `Open()`이나 `SaveAs()`를 호출하면 한글이 **파일마다,
+저장마다** 보안 승인 대화상자를 띄운다:
+
+> 한글을 이용하여 위 파일에 접근하려는 시도(파일의 손상 또는 유출의 위험 등)가
+> 있습니다. 정상적인 작업 과정에만 접근을 허용하십시오.
+> `[접근 허용]` `[모두 허용]` `[허용 안 함]` `[모두 안 함]`
+
+한글 창이 보이는 상태면 사용자가 매번 클릭해야 하고, 숨겨진 상태(`Visible=False`,
+자동화의 기본값)면 **화면에 아무것도 안 보이는 채로** 떠서 스크립트가 **영구 정지**한다.
+원인을 찾기 어려운 쪽은 후자지만 둘은 같은 문제다.
+
+**대화상자에서 "모두 허용"을 눌러도 다음 실행에 또 뜬다.** 그 선택은 저장되지 않는다.
+없애는 방법은 등록뿐이다.
 
 ```python
 h = win32com.client.Dispatch('HWPFrame.HwpObject')
-h.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule')   # 반드시 Open/SaveAs 이전
+if not h.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule'):
+    raise RuntimeError('보안 모듈 등록 실패 — 이대로 진행하면 대화상자가 뜬다')
 ```
 
-이 호출이 동작하려면 사전 등록이 1회 필요하다(`scripts/hwp_com.py`의
-`ensure_security_module()`이 자동 수행):
+두 가지를 모두 지켜야 한다:
 
-1. `FilePathCheckerModule.dll`을 고정 경로에 배치
-   (`pyhwpx` 패키지에 동봉되어 있다: `uv run --with pyhwpx python -c "import pyhwpx,os;print(os.path.dirname(pyhwpx.__file__))"`)
+1. **인스턴스마다** `RegisterModule`을 `Open`/`SaveAs` **이전에** 호출한다.
+   객체 단위 설정이므로 `Dispatch`를 새로 할 때마다 다시 해야 한다.
+   **반환값을 확인한다.** `False`면 DLL을 못 불러온 것이고, 그대로 진행하면
+   대화상자가 뜬다.
+2. **DLL을 레지스트리에 등록한다** (머신당 한 번, 영구히 유지된다).
+
+`scripts/hwp_com.py`가 둘 다 처리한다. `HwpApp` 생성 시 등록을 확인하고,
+안 되어 있으면 `Open` 이전에 `HwpSecurityModuleError`를 던진다 — 보이지 않는
+대화상자 앞에서 멈추는 것보다 낫다.
+
+```bash
+# 등록 (DLL 확보가 필요할 때만 --with pyhwpx. 이후 실행에는 필요 없다)
+uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup
+
+# 상태 확인
+uv run --python 3.12 --link-mode=copy --with pywin32 python hwp_com.py --check
+```
+
+#### 등록의 내용 (`ensure_security_module()`이 하는 일)
+
+1. `FilePathCheckerModule.dll`을 **고정 경로**에 배치한다:
+   `%LOCALAPPDATA%\HwpAutomation\FilePathCheckerModule.dll`
+
+   DLL은 `pyhwpx` 패키지에 동봉되어 있다:
+
+   ```bash
+   uv run --with pyhwpx python -c "import pyhwpx,os;print(os.path.dirname(pyhwpx.__file__))"
+   ```
+
+   **uv의 임시 가상환경 경로를 레지스트리에 넣지 말 것.** 그 경로는 실행마다
+   바뀌므로 다음 실행에 무효가 되고 대화상자가 다시 뜬다. 반드시 복사해서
+   고정 경로를 등록한다.
+
 2. 레지스트리 값 등록 — **`REG_SZ` 값이며, 키가 아니다**
-   - `HKCU\Software\HNC\HwpAutomation\Modules` → `FilePathCheckerModule` = DLL 전체 경로
-   - `HKCU\Software\Hnc\HwpUserAction\Modules` → 동일 (양쪽 모두 넣어두면 안전)
+
+   | 키 | 값 이름 | 값 |
+   |---|---|---|
+   | `HKCU\Software\HNC\HwpAutomation\Modules` | `FilePathCheckerModule` | DLL 전체 경로 |
+   | `HKCU\Software\Hnc\HwpUserAction\Modules` | `FilePathCheckerModule` | 동일 |
+
+   양쪽 모두 넣는다. 한글 버전에 따라 참조하는 키가 다르다.
+
+   **키가 없으면 만든다.** HKCU 아래의 평범한 키이고, 값이 없으면 대화상자가
+   뜨는 것 말고는 얻을 게 없다. (한글을 한 번 실행하면 한글이 직접 만들지만,
+   그걸 사용자에게 시킬 필요는 없다. `winreg.CreateKeyEx` / PowerShell
+   `New-Item -Force`로 만들고, 써넣은 값을 되읽어 검증한다.)
 
 **`regsvr32`는 쓰지 말 것.** 이 DLL에는 `DllRegisterServer` 진입점이 없어서
-`exit code 4`로 실패한다. 관리자 권한으로도 안 된다. 등록은 위의 레지스트리
-방식이 유일하다.
+`exit code 4`로 실패한다. 관리자 권한으로도 안 된다. 위의 레지스트리 방식이 유일하다.
 
-두 레지스트리 키는 **한글이 직접 만드는 키다.** 없다면 새로 만들지 말고
-사용자에게 한글을 한 번 실행해달라고 요청한 뒤 다시 확인한다.
+#### 등록했는데도 대화상자가 뜬다면
+
+| 확인할 것 | 방법 |
+|---|---|
+| `RegisterModule`을 안 부르는 코드가 섞여 있다 | 가장 흔한 원인. 직접 쓴 COM 스니펫, `New-Object -ComObject`, 다른 스크립트를 모두 훑는다 |
+| 레지스트리에 등록된 DLL 경로가 이미 없다 | `--check`가 경로 존재까지 검사한다 (uv 임시 경로를 등록한 경우) |
+| 한글과 DLL의 비트수가 다르다 | 한글이 `C:\Program Files (x86)\Hnc\...`면 32비트. DLL도 32비트여야 `RegisterModule`이 `True`를 반환한다 |
+| ProgID가 틀렸다 | `HWPFrame.HwpObject`가 맞다. `Hancom.HwpObject`는 **존재하지 않는다** |
+
+비트수 확인 (PE 헤더의 machine 필드):
+
+```powershell
+$clsid = (Get-ItemProperty 'HKLM:\SOFTWARE\Classes\HWPFrame.HwpObject\CLSID').'(default)'
+# Wow6432Node 아래에 있으면 한글이 32비트다
+Test-Path "HKLM:\SOFTWARE\Classes\Wow6432Node\CLSID\$clsid"
+```
 
 ## 함정 (모두 실제로 겪은 것)
 
@@ -181,7 +245,10 @@ MCP 서버로 등록해두면 세션마다 `CONNECTION_CLOSED` 오류만 반복�
 import os, win32com.client as w
 
 h = w.Dispatch('HWPFrame.HwpObject')
-h.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule')
+
+# Open/SaveAs 이전에. 반환값을 확인하지 않으면 대화상자에 걸린 걸 알 수 없다.
+if not h.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule'):
+    raise RuntimeError('보안 모듈 미등록 — hwp_com.py --setup 을 먼저 실행할 것')
 
 h.Open(src, 'HWP', 'forceopen:true')
 text = h.GetTextFile('TEXT', '')

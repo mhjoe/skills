@@ -1,214 +1,227 @@
-# HWP 문서 처리 헬퍼 함수들
+﻿# hwp-helper.ps1 — 한글 COM을 PowerShell에서 쓸 때의 최소 헬퍼
+#
+# 이 스킬의 기본 경로는 Python + XML 직접 처리(hwp_handler.py)다. 한글이 필요
+# 없고 서식도 보존된다. **먼저 그 방법을 쓴다.**
+#
+# 여기 있는 함수는 XML로 불가능한 작업(바이너리 .hwp 변환, PDF 내보내기, 텍스트
+# 추출)에만 쓴다. 문서 편집을 COM으로 하지 말 것 — 느리고 함정이 많다.
+#
+# ── 보안 승인 대화상자에 관하여 ────────────────────────────────────────────
+# COM 객체를 만든 뒤 RegisterModule을 호출하지 않으면, 파일을 열 때와 저장할 때
+# 마다 한글이 이 대화상자를 띄운다:
+#
+#   "한글을 이용하여 위 파일에 접근하려는 시도(파일의 손상 또는 유출의 위험 등)가
+#    있습니다. 정상적인 작업 과정에만 접근을 허용하십시오."
+#   [접근 허용] [모두 허용] [허용 안 함] [모두 안 함]
+#
+# 한글 창이 숨겨져 있으면 화면에 보이지도 않는 채로 떠서 스크립트가 영구 정지한다.
+# 이 파일의 New-HwpObject가 매번 등록을 처리하므로, **COM 객체는 반드시
+# New-HwpObject로 만든다.** New-Object -ComObject 를 직접 쓰지 말 것.
+
+# Set-StrictMode는 여기서 켜지 않는다 - 이 파일은 dot-source(. .\hwp-helper.ps1)로
+# 쓰이므로 호출자 세션의 설정까지 바꿔버린다.
+
+$script:HwpProgId = 'HWPFrame.HwpObject'   # 'Hancom.HwpObject'는 존재하지 않는다
+$script:HwpModuleRegPaths = @(
+    'HKCU:\Software\HNC\HwpAutomation\Modules',
+    'HKCU:\Software\Hnc\HwpUserAction\Modules'
+)
+$script:HwpDllPath = Join-Path $env:LOCALAPPDATA 'HwpAutomation\FilePathCheckerModule.dll'
+
+
+function Register-HwpSecurityModule {
+    <#
+    .SYNOPSIS
+        FilePathCheckerModule.dll을 레지스트리에 등록한다 (한 번만 하면 영구).
+    .DESCRIPTION
+        등록하지 않으면 Open/SaveAs마다 보안 승인 대화상자가 뜬다.
+
+        regsvr32는 통하지 않는다 - 이 DLL에는 DllRegisterServer 진입점이 없어
+        exit code 4로 실패한다. 레지스트리 REG_SZ 값 등록이 유일한 방법이다.
+
+        DLL이 없으면 pyhwpx 패키지에서 가져와야 한다:
+          uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 `
+              python hwp_com.py --setup
+    .OUTPUTS
+        [bool] 등록 성공 여부
+    #>
+    [CmdletBinding()]
+    param()
+
+    if (-not (Test-Path $script:HwpDllPath)) {
+        Write-Warning "보안 모듈 DLL이 없습니다: $script:HwpDllPath"
+        Write-Warning "다음을 한 번 실행하면 pyhwpx에서 DLL을 복사해 등록합니다:"
+        Write-Warning "  uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup"
+        return $false
+    }
+
+    $ok = $false
+    foreach ($key in $script:HwpModuleRegPaths) {
+        try {
+            # 키가 없으면 만든다. HKCU 아래의 평범한 키이고, 값이 없으면
+            # 대화상자가 뜨는 것 말고는 얻을 게 없다.
+            if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+            New-ItemProperty -Path $key -Name 'FilePathCheckerModule' `
+                -Value $script:HwpDllPath -PropertyType String -Force | Out-Null
+            if ((Get-ItemProperty $key).FilePathCheckerModule -eq $script:HwpDllPath) { $ok = $true }
+        }
+        catch {
+            Write-Verbose "등록 실패 ($key): $_"
+        }
+    }
+    return $ok
+}
+
+
+function New-HwpObject {
+    <#
+    .SYNOPSIS
+        보안 모듈이 등록된 한글 COM 객체를 만든다. COM 객체는 항상 이 함수로 만든다.
+    .PARAMETER Visible
+        한글 창을 보이게 할지 여부 (기본값: 숨김)
+    .EXAMPLE
+        $hwp = New-HwpObject
+        try { $hwp.Open($path, 'HWP', 'forceopen:true') } finally { Close-HwpObject $hwp }
+    #>
+    [CmdletBinding()]
+    param([switch]$Visible)
+
+    if (-not (Register-HwpSecurityModule)) {
+        throw "보안 모듈을 등록할 수 없어 중단합니다. 계속하면 파일을 열고 저장할 때마다 보안 승인 대화상자가 뜨고, 창이 숨겨져 있으면 보이지 않는 채로 떠서 스크립트가 멈춥니다."
+    }
+
+    $hwp = New-Object -ComObject $script:HwpProgId
+
+    # Open/SaveAs 이전에 호출해야 한다. 빠뜨리면 파일 접근마다 대화상자가 뜬다.
+    if (-not $hwp.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule')) {
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($hwp)
+        throw "RegisterModule이 실패했습니다 (DLL 로드 불가). DLL과 한글의 비트수가 맞는지 확인하세요 - 한글이 32비트면 DLL도 32비트여야 합니다: $script:HwpDllPath"
+    }
+
+    try { $hwp.XHwpWindows.Item(0).Visible = [bool]$Visible } catch { }
+    return $hwp
+}
+
+
+function Close-HwpObject {
+    <#
+    .SYNOPSIS
+        한글 COM 객체를 정상 종료한다.
+    .DESCRIPTION
+        Hwp 프로세스를 강제 종료하지 말 것 - 반복하면 COM이 통째로 응답 불능이
+        되어 다음 객체 생성부터 멈춘다. 복구하려면 사용자가 한글을 직접 한 번
+        실행했다 닫아야 한다.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Hwp)
+
+    try { $Hwp.Clear(1) } catch { }
+    try { $Hwp.Quit() } catch { }
+    try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($Hwp) } catch { }
+}
+
 
 function Get-HwpText {
     <#
     .SYNOPSIS
-        HWP 문서에서 모든 텍스트 추출
-    .PARAMETER Path
-        HWP 파일 경로
+        한글 문서에서 텍스트 추출 (바이너리 .hwp 포함).
+    .DESCRIPTION
+        .hwpx라면 COM 없이 Python 경로가 더 빠르다:
+          uv run --python 3.12 --link-mode=copy --with lxml python -c "..."
+        InitScan/GetText 루프는 종료 상태를 반환하지 않아 무한 루프에 빠지므로
+        GetTextFile을 쓴다.
     .EXAMPLE
         Get-HwpText -Path "C:\document.hwp"
     #>
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path
-    )
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-    if (-not (Test-Path $Path)) {
-        throw "파일을 찾을 수 없습니다: $Path"
-    }
-
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $hwp = New-HwpObject
     try {
-        $hwp = New-Object -ComObject Hancom.HwpObject
-        $hwp.Open($Path, , , 1)  # 읽기 전용 모드
-        $text = $hwp.Api.GetText()
-        $hwp.Quit()
-        return $text
+        $hwp.Open($full, 'HWP', 'forceopen:true')
+        return $hwp.GetTextFile('TEXT', '')
     }
-    catch {
-        Write-Error "HWP 파일 읽기 실패: $_"
-        if ($hwp) { $hwp.Quit() }
+    finally {
+        Close-HwpObject $hwp
     }
 }
 
-function Find-HwpText {
+
+function Convert-HwpFile {
     <#
     .SYNOPSIS
-        HWP 문서에서 특정 텍스트 찾기
-    .PARAMETER Path
-        HWP 파일 경로
-    .PARAMETER SearchText
-        찾을 텍스트
+        한글 문서를 다른 포맷으로 변환한다 (.hwp <-> .hwpx, PDF 내보내기).
+    .PARAMETER Format
+        'HWPX' | 'HWP' | 'PDF' | 'TEXT'
+    .DESCRIPTION
+        바이너리 .hwp를 XML로 다루려면 먼저 .hwpx로 변환한다. 변환 후에는
+        hwp_handler.HwpDocument로 넘겨서 작업한다 - COM으로 편집하지 말 것.
+        왕복 변환은 서식 손실 위험이 있으므로 가능하면 .hwpx로 전달한다.
     .EXAMPLE
-        Find-HwpText -Path "C:\document.hwp" -SearchText "회의"
+        Convert-HwpFile -Path "보고서.hwp" -Format HWPX
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path,
-        [Parameter(Mandatory=$true)]
-        [string]$SearchText
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ValidateSet('HWPX', 'HWP', 'PDF', 'TEXT')][string]$Format,
+        [string]$Destination
     )
 
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath
+    if (-not $Destination) {
+        $ext = @{ HWPX = '.hwpx'; HWP = '.hwp'; PDF = '.pdf'; TEXT = '.txt' }[$Format]
+        $Destination = [IO.Path]::ChangeExtension($full, $ext)
+    }
+    $Destination = [IO.Path]::GetFullPath($Destination)
+
+    $hwp = New-HwpObject
     try {
-        $hwp = New-Object -ComObject Hancom.HwpObject
-        $hwp.Open($Path, , , 1)  # 읽기 전용 모드
+        $hwp.Open($full, 'HWP', 'forceopen:true')
+        $hwp.SaveAs($Destination, $Format, '')
+        return $Destination
+    }
+    finally {
+        Close-HwpObject $hwp
+    }
+}
 
-        $text = $hwp.Api.GetText()
-        $count = ([regex]::Matches($text, [regex]::Escape($SearchText))).Count
 
-        $hwp.Quit()
-        return @{
-            Found = $count
-            Path = $Path
-            SearchTerm = $SearchText
+function Test-HwpEnvironment {
+    <#
+    .SYNOPSIS
+        한글 COM과 보안 모듈 등록 상태를 점검한다.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $clsid = (Get-ItemProperty "HKLM:\SOFTWARE\Classes\$($script:HwpProgId)\CLSID" -ErrorAction SilentlyContinue).'(default)'
+    $registered = @()
+    foreach ($key in $script:HwpModuleRegPaths) {
+        if (Test-Path $key) {
+            $v = (Get-ItemProperty $key -ErrorAction SilentlyContinue).FilePathCheckerModule
+            if ($v -and (Test-Path $v)) { $registered += $key }
         }
     }
-    catch {
-        Write-Error "HWP 파일 검색 실패: $_"
-        if ($hwp) { $hwp.Quit() }
+    return [pscustomobject]@{
+        HwpInstalled   = [bool]$clsid
+        ProgId         = $script:HwpProgId
+        DllPresent     = Test-Path $script:HwpDllPath
+        DllPath        = $script:HwpDllPath
+        RegisteredKeys = $registered
+        DialogFree     = ((Test-Path $script:HwpDllPath) -and $registered.Count -eq $script:HwpModuleRegPaths.Count)
     }
 }
 
-function Replace-HwpText {
-    <#
-    .SYNOPSIS
-        HWP 문서의 텍스트 일괄 변경
-    .PARAMETER Path
-        HWP 파일 경로
-    .PARAMETER SearchText
-        찾을 텍스트
-    .PARAMETER ReplaceText
-        바꿀 텍스트
-    .PARAMETER Backup
-        변경 전 백업 파일 생성 여부 (기본값: $true)
-    .EXAMPLE
-        Replace-HwpText -Path "C:\document.hwp" -SearchText "회의" -ReplaceText "미팅"
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path,
-        [Parameter(Mandatory=$true)]
-        [string]$SearchText,
-        [Parameter(Mandatory=$true)]
-        [string]$ReplaceText,
-        [bool]$Backup = $true
+
+# dot-source(. .\hwp-helper.ps1)로도, Import-Module로도 쓸 수 있게 한다.
+if ($MyInvocation.MyCommand.ModuleName) {
+    Export-ModuleMember -Function @(
+        'Register-HwpSecurityModule',
+        'New-HwpObject',
+        'Close-HwpObject',
+        'Get-HwpText',
+        'Convert-HwpFile',
+        'Test-HwpEnvironment'
     )
-
-    if (-not (Test-Path $Path)) {
-        throw "파일을 찾을 수 없습니다: $Path"
-    }
-
-    # 백업 생성
-    if ($Backup) {
-        $backupPath = "$Path.backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-        Copy-Item -Path $Path -Destination $backupPath
-        Write-Host "백업 파일 생성: $backupPath"
-    }
-
-    try {
-        $hwp = New-Object -ComObject Hancom.HwpObject
-        $hwp.Open($Path, , , 0)  # 편집 모드
-
-        # 찾기/바꾸기 실행
-        $findReplace = $hwp.CreateReplace()
-        $findReplace.SetFindString($SearchText)
-        $findReplace.SetReplaceString($ReplaceText)
-        $replaceCount = $findReplace.ReplaceAll()
-
-        $hwp.Save()
-        $hwp.Quit()
-
-        return @{
-            Path = $Path
-            SearchTerm = $SearchText
-            ReplaceTerm = $ReplaceText
-            ReplacedCount = $replaceCount
-        }
-    }
-    catch {
-        Write-Error "HWP 파일 수정 실패: $_"
-        if ($hwp) { $hwp.Quit() }
-
-        # 백업에서 복구
-        if ($Backup -and (Test-Path $backupPath)) {
-            Write-Host "변경사항이 취소되었습니다."
-        }
-    }
 }
-
-function Get-HwpTextLength {
-    <#
-    .SYNOPSIS
-        HWP 문서의 텍스트 길이 확인
-    .PARAMETER Path
-        HWP 파일 경로
-    .EXAMPLE
-        Get-HwpTextLength -Path "C:\document.hwp"
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path
-    )
-
-    try {
-        $hwp = New-Object -ComObject Hancom.HwpObject
-        $hwp.Open($Path, , , 1)  # 읽기 전용 모드
-        $length = $hwp.Api.GetTextLength()
-        $hwp.Quit()
-        return $length
-    }
-    catch {
-        Write-Error "HWP 파일 길이 확인 실패: $_"
-        if ($hwp) { $hwp.Quit() }
-    }
-}
-
-function Get-HwpTextRange {
-    <#
-    .SYNOPSIS
-        HWP 문서의 특정 범위 텍스트 추출
-    .PARAMETER Path
-        HWP 파일 경로
-    .PARAMETER Start
-        시작 위치 (기본값: 0)
-    .PARAMETER Length
-        추출할 텍스트 길이
-    .EXAMPLE
-        Get-HwpTextRange -Path "C:\document.hwp" -Start 0 -Length 100
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path,
-        [int]$Start = 0,
-        [Parameter(Mandatory=$true)]
-        [int]$Length
-    )
-
-    try {
-        $hwp = New-Object -ComObject Hancom.HwpObject
-        $hwp.Open($Path, , , 1)  # 읽기 전용 모드
-
-        $hwp.Api.SetCursorPos($Start)
-        $text = $hwp.Api.GetText($Length)
-        $hwp.Quit()
-        return $text
-    }
-    catch {
-        Write-Error "HWP 텍스트 범위 추출 실패: $_"
-        if ($hwp) { $hwp.Quit() }
-    }
-}
-
-# Export
-Export-ModuleMember -Function @(
-    'Get-HwpText',
-    'Find-HwpText',
-    'Replace-HwpText',
-    'Get-HwpTextLength',
-    'Get-HwpTextRange'
-)

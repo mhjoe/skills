@@ -45,26 +45,40 @@ if ($clsid) {
     Write-Host "  -   한글이 설치되지 않았습니다 (.hwpx 작업만 가능)" -ForegroundColor DarkGray
 }
 
-# [4/4] 보안 모듈
-Write-Host "[4/4] 보안 모듈 확인..." -ForegroundColor Yellow
-$dll = "$env:LOCALAPPDATA\HwpAutomation\FilePathCheckerModule.dll"
-$reg = $false
-foreach ($k in @('HKCU:\Software\HNC\HwpAutomation\Modules','HKCU:\Software\Hnc\HwpUserAction\Modules')) {
-    if (Test-Path $k) {
-        $v = (Get-ItemProperty $k -ErrorAction SilentlyContinue).FilePathCheckerModule
-        if ($v) { $reg = $true }
-    }
-}
-if ($reg -and (Test-Path $dll)) {
-    Write-Host "  OK  보안 모듈 등록됨" -ForegroundColor Green
-} elseif ($clsid) {
-    Write-Host "  !   미등록 - Open/SaveAs가 보이지 않는 대화상자에서 멈춥니다." -ForegroundColor Yellow
-    Write-Host "      자동 등록: scripts 폴더에서 아래 실행" -ForegroundColor Cyan
-    Write-Host "      uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py" -ForegroundColor White
-    Write-Host "      레지스트리 키가 없다면 한글을 한 번 실행한 뒤 재시도하세요." -ForegroundColor Yellow
-    Write-Host "      regsvr32는 이 DLL에 통하지 않습니다 (DllRegisterServer 없음)." -ForegroundColor DarkGray
-} else {
+# [4/4] 보안 모듈 - 등록하지 않으면 파일 접근마다 보안 승인 대화상자가 뜬다
+Write-Host "[4/4] 보안 모듈 확인 / 등록..." -ForegroundColor Yellow
+. (Join-Path $PSScriptRoot 'hwp-helper.ps1')
+
+if (-not $clsid) {
     Write-Host "  -   한글 미설치로 불필요" -ForegroundColor DarkGray
+}
+else {
+    $st = Test-HwpEnvironment
+    if (-not $st.DialogFree) {
+        # 그냥 알려주고 끝내지 않는다. 등록은 이 스크립트가 직접 한다.
+        Write-Host "  ..  미등록 상태 - 지금 등록합니다" -ForegroundColor Yellow
+        [void](Register-HwpSecurityModule)
+        $st = Test-HwpEnvironment
+    }
+
+    if ($st.DialogFree) {
+        Write-Host "  OK  보안 모듈 등록됨 - 보안 승인 대화상자가 뜨지 않습니다" -ForegroundColor Green
+    }
+    elseif (-not $st.DllPresent) {
+        Write-Host "  X   보안 모듈 DLL이 없습니다" -ForegroundColor Red
+        Write-Host "      DLL은 pyhwpx 패키지에 동봉되어 있습니다. 아래를 한 번 실행하면" -ForegroundColor Yellow
+        Write-Host "      DLL이 %LOCALAPPDATA%\HwpAutomation\ 에 복사되고 등록됩니다:" -ForegroundColor Yellow
+        Write-Host "      uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup" -ForegroundColor White
+        Write-Host "      (이후 실행에는 pyhwpx가 필요 없습니다)" -ForegroundColor DarkGray
+        Write-Host "      regsvr32는 이 DLL에 통하지 않습니다 - DllRegisterServer 진입점이 없습니다." -ForegroundColor DarkGray
+        $fail = $true
+    }
+    else {
+        Write-Host "  X   레지스트리 등록에 실패했습니다" -ForegroundColor Red
+        Write-Host "      DLL: $($st.DllPath)" -ForegroundColor DarkGray
+        Write-Host "      등록된 키: $($st.RegisteredKeys -join ', ')" -ForegroundColor DarkGray
+        $fail = $true
+    }
 }
 
 Write-Host ""
