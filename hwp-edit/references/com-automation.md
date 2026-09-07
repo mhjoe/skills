@@ -116,12 +116,34 @@ if not h.RegisterModule('FilePathCheckDLL', 'FilePathCheckerModule'):
 대화상자 앞에서 멈추는 것보다 낫다.
 
 ```bash
-# 등록 (DLL 확보가 필요할 때만 --with pyhwpx. 이후 실행에는 필요 없다)
-uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup
+# 확보 + 등록 (DLL이 없으면 자동으로 내려받는다)
+uv run --python 3.12 --link-mode=copy --with pywin32 python hwp_com.py --setup
 
-# 상태 확인
+# 상태 확인 (내려받지 않는다 - 읽기 전용)
 uv run --python 3.12 --link-mode=copy --with pywin32 python hwp_com.py --check
 ```
+
+#### 새 환경에서는 DLL도 자동으로 확보한다
+
+`fetch_dll()`이 `uv`로 **일회성 환경**에 `pyhwpx`를 받아 DLL만 고정 경로로 복사한다.
+`pyhwpx`를 호출자 환경에 설치하지 않는다 — 필요한 건 DLL 하나뿐이고, 확보 후에는
+`pyhwpx`도 네트워크도 필요 없다.
+
+`ensure_security_module()`이 DLL을 어디에서도 못 찾으면 이 경로를 자동으로 탄다.
+**새 PC에서 사용자에게 설치 명령을 안내할 필요가 없다.** PowerShell의
+`Register-HwpSecurityModule`도 같은 일을 한다(`hwp_com.py --setup`을 호출).
+
+- 최초 1회만 네트워크가 필요하다(1~2분).
+- 자식 프로세스에는 `HWP_COM_DLL_BOOTSTRAP=1`을 넘겨 재귀를 막는다.
+- 한 프로세스에서 두 번 시도하지 않는다(`_FETCH_TRIED`). 실패마다 수백 초를 쓰면
+  안 된다.
+- `--check`는 내려받지 않는다. 진단은 읽기 전용이어야 한다.
+- `uv`는 PATH에 없으면 `%USERPROFILE%\.local\bin\uv.exe`와
+  `%LOCALAPPDATA%\uv\bin\uv.exe`도 본다.
+
+실패는 두 경우뿐이고 예외 메시지가 어느 쪽인지 알려준다: `uv`가 없거나
+(`winget install astral-sh.uv`), 오프라인이거나. 오프라인이면 DLL을 고정 경로에
+직접 두면 된다.
 
 #### 등록의 내용 (`ensure_security_module()`이 하는 일)
 
@@ -216,6 +238,20 @@ text = h.GetTextFile('TEXT', '')
 ```powershell
 Get-Process Hwp | Select-Object Id, MainWindowTitle
 ```
+
+### `Could not add module ... circular import`은 실패가 아니다
+
+첫 `Dispatch()`에서 pywin32가 타입 라이브러리 캐시를 만들며 stderr에 이런 걸 뱉는다:
+
+```
+Rebuilding cache of generated files for COM support...
+Could not add module (IID('{...}'), 0, 1, 0) - <class 'ImportError'>:
+    cannot import name '_get_good_object_' from partially initialized module 'win32com.client'
+Done.
+```
+
+`Dispatch`는 늦은 바인딩이라 이 캐시가 없어도 동작한다. **작업은 정상적으로
+끝난다.** 새 uv 환경의 첫 실행에서 자주 보인다. 오류로 보고하지 말 것.
 
 ### 콘솔의 한글 깨짐은 데이터 문제가 아니다
 

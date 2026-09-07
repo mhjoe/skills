@@ -119,15 +119,29 @@ if not hwp.RegisterModule("FilePathCheckDLL", "FilePathCheckerModule"):
     raise RuntimeError(f"보안 모듈 등록 실패: {dll} — 이대로 진행하면 대화상자가 뜬다")
 ```
 
-DLL 확보가 필요하면 실행 명령에 `--with pyhwpx`를 붙인다. **한 번만** 필요하다:
+#### 새 환경에서의 준비 — 자동이다
+
+`hwp_com.py`는 DLL이 어디에도 없으면 **스스로 확보한다.** `uv`로 일회성 환경에
+`pyhwpx`를 받아 DLL만 `%LOCALAPPDATA%\HwpAutomation\`에 복사하고 등록한다.
+`pyhwpx`를 현재 환경에 설치하지는 않는다.
+
+**따라서 새 PC에서도 사용자에게 설치 명령을 안내할 필요가 없다.** 첫 COM 호출에서
+자동으로 처리된다. 최초 1회만 네트워크가 필요하고(1~2분), 그 뒤로는 `pyhwpx`도
+네트워크도 필요 없다. PowerShell의 `New-HwpObject`도 같은 경로를 탄다.
+
+미리 준비하거나 상태를 확인하려면:
 
 ```bash
-# 등록 후 상태 출력 (DLL 확보가 필요할 때. 이후 실행에는 pyhwpx가 필요 없다)
-uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python scripts/hwp_com.py --setup
+# 확보 + 등록 (DLL이 없으면 자동으로 내려받는다)
+uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --setup
 
-# 등록 상태만 확인
+# 등록 상태만 확인 (내려받지 않는다)
 uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --check
 ```
+
+자동 확보가 실패하는 경우는 둘뿐이고, 예외 메시지가 어느 쪽인지 알려준다:
+`uv`가 PATH에 없거나(`winget install astral-sh.uv`), 오프라인이거나. 오프라인이면
+DLL을 위 경로에 직접 두면 된다(한글과 **비트수가 같아야** 한다).
 
 PowerShell에서는 `New-Object -ComObject`를 직접 쓰지 말고
 `scripts/hwp-helper.ps1`의 `New-HwpObject`를 쓴다(등록을 대신 처리한다).
@@ -361,10 +375,11 @@ Get-Process Hwp | Select-Object Id, MainWindowTitle
    코드가 섞여 있다는 뜻이다.** 직접 작성한 COM 스니펫이나
    `New-Object -ComObject`를 찾아 위의 "COM을 쓸 때의 절대 규칙"대로 고친다.
 
-2. `미등록`이면 한 번만 등록한다(영구히 유지된다):
+2. `미등록`이면 등록한다(한 번만, 영구히 유지된다). DLL이 없으면 자동으로
+   내려받는다:
 
    ```bash
-   uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python scripts/hwp_com.py --setup
+   uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --setup
    ```
 
 3. `RegisterModule` 자체가 `False`를 반환하면 DLL 로드 실패다. 한글과 DLL의

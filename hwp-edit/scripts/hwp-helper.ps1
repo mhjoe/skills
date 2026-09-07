@@ -49,10 +49,31 @@ function Register-HwpSecurityModule {
     param()
 
     if (-not (Test-Path $script:HwpDllPath)) {
-        Write-Warning "보안 모듈 DLL이 없습니다: $script:HwpDllPath"
-        Write-Warning "다음을 한 번 실행하면 pyhwpx에서 DLL을 복사해 등록합니다:"
-        Write-Warning "  uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup"
-        return $false
+        # 새 환경 첫 실행. 사용자에게 설치 명령을 시키지 않고 직접 확보한다.
+        # DLL은 pyhwpx 패키지에 동봉되어 있다. 최초 1회만 네트워크가 필요하다.
+        Write-Host "보안 모듈 DLL이 없습니다. pyhwpx에서 자동으로 확보합니다 (최초 1회)..." -ForegroundColor Yellow
+
+        $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source
+        if (-not $uv) {
+            foreach ($c in @("$env:USERPROFILE\.local\bin\uv.exe", "$env:LOCALAPPDATA\uv\bin\uv.exe")) {
+                if (Test-Path $c) { $uv = $c; break }
+            }
+        }
+        if (-not $uv) {
+            Write-Warning "uv를 찾을 수 없어 DLL을 확보할 수 없습니다. 설치: winget install astral-sh.uv"
+            return $false
+        }
+
+        $comPy = Join-Path $PSScriptRoot 'hwp_com.py'
+        & $uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python $comPy --setup | Out-Null
+
+        if (-not (Test-Path $script:HwpDllPath)) {
+            Write-Warning "DLL 자동 확보에 실패했습니다. 네트워크를 확인하거나, 오프라인 환경이라면"
+            Write-Warning "DLL을 직접 이 경로에 두세요: $script:HwpDllPath"
+            Write-Warning "(한글과 비트수가 같아야 합니다 - 한글이 32비트면 DLL도 32비트)"
+            return $false
+        }
+        Write-Host "  OK  DLL 확보 완료 - 이후 실행에는 pyhwpx도, 네트워크도 필요 없습니다" -ForegroundColor Green
     }
 
     $ok = $false

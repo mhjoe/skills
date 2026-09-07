@@ -7,6 +7,17 @@ hwp_com.py — hwp-edit 스킬의 COM 폴백 헬퍼.
 실행 (pip 아님):
     uv run --python 3.12 --link-mode=copy --with pywin32 python 스크립트.py
 
+보안 모듈은 알아서 준비된다. RegisterModule 없이 Open/SaveAs를 호출하면 한글이
+파일마다 보안 승인 대화상자를 띄우는데(창이 숨겨져 있으면 보이지 않는 채로 떠서
+영구 정지한다), HwpApp이 생성 시 DLL 확보·등록·RegisterModule을 모두 처리하고
+실패하면 Open 이전에 HwpSecurityModuleError를 던진다.
+
+DLL이 없는 새 환경에서는 uv로 일회성 환경에 pyhwpx를 받아 DLL만 꺼내온다
+(최초 1회, 네트워크 필요). pyhwpx를 호출자 환경에 설치하지는 않는다.
+
+    python hwp_com.py --setup    # 확보 + 등록 (없으면 자동으로 내려받는다)
+    python hwp_com.py --check    # 상태 확인 (읽기 전용)
+
 자세한 배경과 함정은 references/com-automation.md 참조.
 """
 
@@ -18,7 +29,7 @@ from pathlib import Path
 
 __all__ = [
     "detect_format", "needs_conversion", "ensure_security_module",
-    "security_module_status", "HwpSecurityModuleError",
+    "security_module_status", "fetch_dll", "HwpSecurityModuleError",
     "HwpApp", "shared_app", "to_hwpx", "to_hwp", "to_pdf", "get_text",
 ]
 
@@ -101,11 +112,81 @@ def _dll_candidates():
                 yield hit
 
 
-def _find_dll() -> Path | None:
+# 자식 프로세스에서 실행되는 코드. pyhwpx를 일회성 환경에 받아 DLL만 꺼내온다.
+_FETCH_DLL_CHILD = """
+import pathlib, shutil, sys
+import pyhwpx
+
+src = pathlib.Path(pyhwpx.__file__).parent / "FilePathCheckerModule.dll"
+dst = pathlib.Path(sys.argv[1])
+dst.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(src, dst)
+print(dst)
+"""
+
+# 부트스트랩 자식이 다시 부트스트랩을 시도하는 재귀를 막는다.
+_BOOTSTRAP_GUARD = "HWP_COM_DLL_BOOTSTRAP"
+
+_FETCH_TRIED = False
+
+
+def _uv_executable() -> str | None:
+    """uv 실행 파일. PATH에 없으면 표준 설치 위치도 본다."""
+    found = shutil.which("uv")
+    if found:
+        return found
+    for cand in (
+        Path(os.environ.get("USERPROFILE", "")) / ".local" / "bin" / "uv.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "uv" / "bin" / "uv.exe",
+    ):
+        if cand.exists():
+            return str(cand)
+    return None
+
+
+def fetch_dll(timeout: int = 300) -> Path | None:
+    """pyhwpx에서 DLL을 받아 고정 경로에 복사한다. 새 환경 첫 실행용.
+
+    uv로 일회성 환경에 pyhwpx를 받아 DLL만 꺼내온다. **이 프로세스에 pyhwpx를
+    설치하지 않는다** — DLL 하나만 있으면 되고, 그 뒤로는 pyhwpx가 필요 없다.
+
+    최초 1회만 네트워크가 필요하다. 실패하면 None을 반환하고, 호출자가
+    _DLL_HELP로 사용자에게 수동 절차를 안내한다.
+    """
+    import subprocess
+
+    global _FETCH_TRIED
+
+    if os.environ.get(_BOOTSTRAP_GUARD):
+        return None  # 이미 부트스트랩 자식 안이다
+    if _FETCH_TRIED:
+        return None  # 한 프로세스에서 두 번 시도하지 않는다 (매번 수백 초를 쓴다)
+    _FETCH_TRIED = True
+
+    uv = _uv_executable()
+    if uv is None:
+        return None
+
+    env = dict(os.environ, **{_BOOTSTRAP_GUARD: "1"})
+    try:
+        subprocess.run(
+            [uv, "run", "--python", "3.12", "--link-mode=copy", "--with", "pyhwpx",
+             "python", "-c", _FETCH_DLL_CHILD, str(_STABLE_DLL)],
+            check=True, capture_output=True, timeout=timeout, env=env,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return _STABLE_DLL if _STABLE_DLL.exists() else None
+
+
+def _find_dll(auto_fetch: bool = True) -> Path | None:
     """DLL을 찾아 고정 경로(LOCALAPPDATA)에 복사하고 그 경로를 반환한다.
 
     고정 경로에 두는 이유: uv의 임시 가상환경에 있는 pyhwpx 경로는 실행마다
     바뀌어서, 레지스트리에 그 경로를 넣으면 다음 실행에 무효가 된다.
+
+    어디에도 없으면 auto_fetch로 내려받는다 — 새 환경에서 사용자가 별도
+    설치 명령을 실행하지 않아도 되게 하기 위해서다.
     """
     for cand in _dll_candidates():
         if not cand.exists():
@@ -118,7 +199,8 @@ def _find_dll() -> Path | None:
             return _STABLE_DLL
         except OSError:
             return cand  # 복사 실패 시 원본 경로라도 쓴다
-    return None
+
+    return fetch_dll() if auto_fetch else None
 
 
 def security_module_status() -> dict:
@@ -145,8 +227,11 @@ def security_module_status() -> dict:
     return {"dll": dll, "registered": registered, "missing": missing}
 
 
-def ensure_security_module() -> bool:
+def ensure_security_module(auto_fetch: bool = True) -> bool:
     """DLL을 고정 경로에 배치하고 레지스트리에 등록한다. 성공 여부를 반환.
+
+    - DLL이 어디에도 없으면 auto_fetch로 내려받는다(최초 1회, 네트워크 필요).
+      새 환경에서 사용자가 별도 설치 명령을 실행하지 않아도 되게 하기 위해서다.
 
     - 키가 없으면 **만든다.** HKCU 아래의 평범한 키이고, 값이 없으면 대화상자가
       뜨는 것 말고는 얻을 게 없다. (한글을 한 번 실행하면 한글이 직접 만들지만,
@@ -157,7 +242,7 @@ def ensure_security_module() -> bool:
     """
     import winreg
 
-    dll = _find_dll()
+    dll = _find_dll(auto_fetch=auto_fetch)
     if dll is None:
         return False
 
@@ -176,16 +261,24 @@ def ensure_security_module() -> bool:
     return ok
 
 
-_DLL_HELP = r"""보안 모듈(FilePathCheckerModule.dll)을 등록할 수 없습니다.
+_DLL_HELP = r"""보안 모듈(FilePathCheckerModule.dll)을 확보하지 못했습니다.
 등록되지 않으면 파일을 열고 저장할 때마다 한글 보안 승인 대화상자가 뜨고,
 한글 창이 숨겨져 있으면 보이지 않는 채로 떠서 스크립트가 멈춥니다.
 
-DLL은 pyhwpx 패키지에 동봉되어 있습니다. 아래처럼 pyhwpx를 포함해 한 번만
-실행하면 DLL이 %LOCALAPPDATA%\HwpAutomation\ 에 복사되고 등록됩니다:
+DLL은 pyhwpx 패키지에 동봉되어 있고, 없으면 자동으로 내려받게 되어 있습니다.
+그 자동 확보가 실패했으므로 아래 중 하나를 확인하세요:
 
-    uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32         python hwp_com.py --setup
+  - 네트워크: 최초 1회만 필요합니다(pyhwpx 다운로드).
+  - uv: PATH에서 찾지 못했습니다. `winget install astral-sh.uv`
+  - 오프라인 환경이라면 DLL을 직접 아래 경로에 두면 됩니다:
+        %LOCALAPPDATA%\HwpAutomation\FilePathCheckerModule.dll
+    (한글과 비트수가 같아야 합니다. 한글이 32비트면 DLL도 32비트)
 
-이후 실행에는 pyhwpx가 필요 없습니다."""
+수동으로 다시 시도하려면:
+
+    uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup
+
+한 번 확보되면 이후 실행에는 pyhwpx도, 네트워크도 필요하지 않습니다."""
 
 
 # --------------------------------------------------------------------------
@@ -382,6 +475,8 @@ if __name__ == "__main__":
         sys.exit(0 if _print_status() else 1)
 
     if args[0] == "--setup":
+        if not any(c.exists() for c in _dll_candidates()):
+            print("보안 모듈 DLL이 없습니다. pyhwpx에서 자동으로 확보합니다 (최초 1회, 네트워크 필요)...")
         registered = ensure_security_module()
         ok = _print_status()
         if not registered or not ok:

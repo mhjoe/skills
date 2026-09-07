@@ -66,10 +66,12 @@ else {
     }
     elseif (-not $st.DllPresent) {
         Write-Host "  X   보안 모듈 DLL이 없습니다" -ForegroundColor Red
-        Write-Host "      DLL은 pyhwpx 패키지에 동봉되어 있습니다. 아래를 한 번 실행하면" -ForegroundColor Yellow
-        Write-Host "      DLL이 %LOCALAPPDATA%\HwpAutomation\ 에 복사되고 등록됩니다:" -ForegroundColor Yellow
-        Write-Host "      uv run --python 3.12 --link-mode=copy --with pyhwpx --with pywin32 python hwp_com.py --setup" -ForegroundColor White
-        Write-Host "      (이후 실행에는 pyhwpx가 필요 없습니다)" -ForegroundColor DarkGray
+        Write-Host "      DLL 자동 확보에 실패했습니다. 확인할 것:" -ForegroundColor Yellow
+        Write-Host "      - 네트워크 (최초 1회만 필요, pyhwpx 다운로드)" -ForegroundColor Yellow
+        Write-Host "      - uv 설치: winget install astral-sh.uv" -ForegroundColor Yellow
+        Write-Host "      오프라인이면 DLL을 직접 이 경로에 두면 됩니다:" -ForegroundColor Yellow
+        Write-Host "      %LOCALAPPDATA%\HwpAutomation\FilePathCheckerModule.dll" -ForegroundColor White
+        Write-Host "      (한글과 비트수가 같아야 합니다 - 한글이 32비트면 DLL도 32비트)" -ForegroundColor DarkGray
         Write-Host "      regsvr32는 이 DLL에 통하지 않습니다 - DllRegisterServer 진입점이 없습니다." -ForegroundColor DarkGray
         $fail = $true
     }
