@@ -140,10 +140,16 @@ uv run --python 3.12 --link-mode=copy --with pywin32 python hwp_com.py --check
 - `--check`는 내려받지 않는다. 진단은 읽기 전용이어야 한다.
 - `uv`는 PATH에 없으면 `%USERPROFILE%\.local\bin\uv.exe`와
   `%LOCALAPPDATA%\uv\bin\uv.exe`도 본다.
+- **확보 경로는 두 단계다.** `_fetch_via_uv()`가 실패하면 `_fetch_via_pip()`가
+  이어받는다. 후자는 `pip download pyhwpx --no-deps`로 휠만 받아 ZIP에서
+  `FilePathCheckerModule.dll` 하나를 꺼낸다. **설치가 아니므로** 현재 환경에
+  `pyhwpx`가 남지 않는 것은 `uv` 경로와 같다.
 
-실패는 두 경우뿐이고 예외 메시지가 어느 쪽인지 알려준다: `uv`가 없거나
-(`winget install astral-sh.uv`), 오프라인이거나. 오프라인이면 DLL을 고정 경로에
-직접 두면 된다.
+실패는 오프라인일 때뿐이다. 그때는 DLL을 고정 경로에 직접 두면 된다.
+
+`uv` 단독이던 시절에는 `uv`가 없는 PC에서 자동 확보가 조용히 실패해, 보안 모듈이
+미등록으로 방치되고 파일 접근마다 승인 대화상자가 떴다. `pip` 폴백은 그 구멍을
+막는다.
 
 #### 등록의 내용 (`ensure_security_module()`이 하는 일)
 

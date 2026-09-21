@@ -141,9 +141,17 @@ uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py -
 uv run --python 3.12 --link-mode=copy --with pywin32 python scripts/hwp_com.py --check
 ```
 
-자동 확보가 실패하는 경우는 둘뿐이고, 예외 메시지가 어느 쪽인지 알려준다:
-`uv`가 PATH에 없거나(`winget install astral-sh.uv`), 오프라인이거나. 오프라인이면
-DLL을 위 경로에 직접 두면 된다(한글과 **비트수가 같아야** 한다).
+DLL 확보는 **`uv` → `pip` 두 경로를 차례로 시도한다.** `uv`가 있으면 일회성
+환경에 `pyhwpx`를 받아 DLL만 꺼내고, `uv`가 없으면 `pip download pyhwpx`로 휠만
+내려받아(설치하지 않는다) 그 안의 DLL을 꺼낸다. 어느 쪽이든 현재 환경에
+`pyhwpx`가 남지 않는다.
+
+따라서 자동 확보가 실패하는 경우는 **오프라인일 때뿐이다.** 그때는 DLL을 위 경로에
+직접 두면 된다(한글과 **비트수가 같아야** 한다 — 한글이 32비트면 DLL도 32비트).
+
+> `pip` 폴백이 없던 시절에는 `uv`가 설치되지 않은 PC에서 자동 확보가 조용히
+> 실패했다. 그러면 보안 모듈이 미등록인 채로 방치되고, 파일을 열 때마다 승인
+> 대화상자가 떴다. **`--check`로 상태를 먼저 확인하는 습관이 안전하다.**
 
 PowerShell에서는 `New-Object -ComObject`를 직접 쓰지 말고
 `scripts/hwp-helper.ps1`의 `New-HwpObject`를 쓴다(등록을 대신 처리한다).

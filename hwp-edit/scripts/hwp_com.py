@@ -26,6 +26,7 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import sys
 from pathlib import Path
 
 __all__ = [
@@ -145,29 +146,13 @@ def _uv_executable() -> str | None:
     return None
 
 
-def fetch_dll(timeout: int = 300) -> Path | None:
-    """pyhwpx에서 DLL을 받아 고정 경로에 복사한다. 새 환경 첫 실행용.
-
-    uv로 일회성 환경에 pyhwpx를 받아 DLL만 꺼내온다. **이 프로세스에 pyhwpx를
-    설치하지 않는다** — DLL 하나만 있으면 되고, 그 뒤로는 pyhwpx가 필요 없다.
-
-    최초 1회만 네트워크가 필요하다. 실패하면 None을 반환하고, 호출자가
-    _DLL_HELP로 사용자에게 수동 절차를 안내한다.
-    """
+def _fetch_via_uv(timeout: int) -> bool:
+    """uv 일회성 환경으로 pyhwpx를 받아 DLL만 꺼낸다."""
     import subprocess
-
-    global _FETCH_TRIED
-
-    if os.environ.get(_BOOTSTRAP_GUARD):
-        return None  # 이미 부트스트랩 자식 안이다
-    if _FETCH_TRIED:
-        return None  # 한 프로세스에서 두 번 시도하지 않는다 (매번 수백 초를 쓴다)
-    _FETCH_TRIED = True
 
     uv = _uv_executable()
     if uv is None:
-        return None
-
+        return False
     env = dict(os.environ, **{_BOOTSTRAP_GUARD: "1"})
     try:
         subprocess.run(
@@ -176,8 +161,74 @@ def fetch_dll(timeout: int = 300) -> Path | None:
             check=True, capture_output=True, timeout=timeout, env=env,
         )
     except (subprocess.SubprocessError, OSError):
-        return None
-    return _STABLE_DLL if _STABLE_DLL.exists() else None
+        return False
+    return _STABLE_DLL.exists()
+
+
+def _fetch_via_pip(timeout: int) -> bool:
+    """uv가 없을 때의 폴백. pip로 휠만 내려받아 DLL을 꺼낸다.
+
+    `pip download`는 **설치하지 않고** 휠 파일만 가져온다. 휠은 ZIP이므로
+    그 안의 FilePathCheckerModule.dll 하나만 꺼내 쓰고 나머지는 버린다.
+    현재 환경에 pyhwpx가 남지 않는다는 점은 uv 경로와 같다.
+    """
+    import subprocess, tempfile, zipfile
+
+    exe = sys.executable
+    if not exe:
+        return False
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            subprocess.run(
+                [exe, "-m", "pip", "download", "pyhwpx", "--no-deps", "--dest", td],
+                check=True, capture_output=True, timeout=timeout,
+                env=dict(os.environ, **{_BOOTSTRAP_GUARD: "1"}),
+            )
+        except (subprocess.SubprocessError, OSError):
+            return False
+        for whl in Path(td).glob("pyhwpx-*.whl"):
+            try:
+                with zipfile.ZipFile(whl) as z:
+                    name = next(
+                        (n for n in z.namelist()
+                         if n.rsplit("/", 1)[-1].lower() == "filepathcheckermodule.dll"),
+                        None,
+                    )
+                    if name is None:
+                        continue
+                    _STABLE_DLL.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(name) as src, open(_STABLE_DLL, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    return True
+            except (zipfile.BadZipFile, OSError):
+                continue
+    return False
+
+
+def fetch_dll(timeout: int = 300) -> Path | None:
+    """pyhwpx에서 DLL을 받아 고정 경로에 복사한다. 새 환경 첫 실행용.
+
+    uv로 일회성 환경에 pyhwpx를 받아 DLL만 꺼내오고, **uv가 없으면 pip로
+    휠만 내려받아 같은 일을 한다.** 어느 쪽이든 **이 프로세스에 pyhwpx를
+    설치하지 않는다** — DLL 하나만 있으면 되고, 그 뒤로는 pyhwpx가 필요 없다.
+
+    uv 경로만 있던 시절에는 uv가 없는 PC에서 자동 확보가 조용히 실패해
+    보안 모듈이 미등록으로 방치되고, 파일을 열 때마다 승인 대화상자가 떴다.
+
+    최초 1회만 네트워크가 필요하다. 둘 다 실패하면 None을 반환하고, 호출자가
+    _DLL_HELP로 사용자에게 수동 절차를 안내한다.
+    """
+    global _FETCH_TRIED
+
+    if os.environ.get(_BOOTSTRAP_GUARD):
+        return None  # 이미 부트스트랩 자식 안이다
+    if _FETCH_TRIED:
+        return None  # 한 프로세스에서 두 번 시도하지 않는다 (매번 수백 초를 쓴다)
+    _FETCH_TRIED = True
+
+    if _fetch_via_uv(timeout) or _fetch_via_pip(timeout):
+        return _STABLE_DLL if _STABLE_DLL.exists() else None
+    return None
 
 
 def _find_dll(auto_fetch: bool = True) -> Path | None:
