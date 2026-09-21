@@ -41,6 +41,7 @@ class HwpDocument:
         self.temp_dir = None
         self.content_xml = None
         self.root = None
+        self.sections = []          # [(경로, 루트), ...] 문서 순서
 
         if not self.file_path.exists():
             raise FileNotFoundError(f"파일을 찾을 수 없습니다: {file_path}")
@@ -59,37 +60,54 @@ class HwpDocument:
             shutil.rmtree(self.temp_dir)
             raise ValueError(f"잘못된 HWP 파일 형식입니다: {self.file_path}")
 
-        self.content_xml = self.temp_dir / 'content.xml'
-        # hwpx 형식 지원 (Contents/section0.xml)
-        if not self.content_xml.exists():
-            self.content_xml = self.temp_dir / 'Contents' / 'section0.xml'
+        # 본문 XML 목록을 문서 순서대로 모은다.
+        # .hwpx 는 본문이 Contents/section0.xml, section1.xml ... 로 나뉘며,
+        # 장/절 구분이나 단 구성이 바뀌는 지점마다 새 섹션이 생긴다. 표지·초록이
+        # section0, 본문이 section2 에 있는 문서가 흔하므로 section0 만 보면
+        # 본문 전체를 놓친다.
+        contents = self.temp_dir / 'Contents'
+        self.section_paths = sorted(
+            contents.glob('section*.xml'),
+            key=lambda q: int(re.search(r'section(\d+)', q.name).group(1)),
+        ) if contents.is_dir() else []
 
-        if not self.content_xml.exists():
+        legacy = self.temp_dir / 'content.xml'
+        if legacy.exists():
+            self.section_paths = [legacy] + self.section_paths
+
+        if not self.section_paths:
             shutil.rmtree(self.temp_dir)
-            raise ValueError("content.xml 또는 section0.xml을 찾을 수 없습니다. 손상된 HWP 파일일 수 있습니다.")
+            raise ValueError("content.xml 또는 Contents/section*.xml을 찾을 수 없습니다. 손상된 HWP 파일일 수 있습니다.")
+
+        # 하위 호환: 기존 코드가 참조하는 단일 경로
+        self.content_xml = self.section_paths[0]
+
+    def _parse_one(self, path):
+        """본문 XML 하나를 파싱해 루트를 돌려준다."""
+        try:
+            parser = ET.XMLParser(recover=True, strip_cdata=False)
+            return ET.parse(str(path), parser).getroot()
+        except Exception:
+            with open(path, 'rb') as f:
+                content = f.read()
+            if content.startswith(b'\xef\xbb\xbf'):     # BOM 제거
+                content = content[3:]
+            import xml.etree.ElementTree as StdET
+            return StdET.fromstring(content)
 
     def _parse_content(self):
-        """content.xml 파싱"""
+        """모든 본문 XML을 문서 순서대로 파싱"""
         try:
-            # lxml 사용 시도 (더 견고한 파싱)
-            try:
-                parser = ET.XMLParser(recover=True, strip_cdata=False)
-                tree = ET.parse(str(self.content_xml), parser)
-                self.root = tree.getroot()
-            except:
-                # lxml 없을 경우 표준 XML 파서 사용
-                with open(self.content_xml, 'rb') as f:
-                    content = f.read()
-
-                # BOM 제거
-                if content.startswith(b'\xef\xbb\xbf'):
-                    content = content[3:]
-
-                import xml.etree.ElementTree as StdET
-                self.root = StdET.fromstring(content)
+            self.sections = [(q, self._parse_one(q)) for q in self.section_paths]
         except Exception as e:
             shutil.rmtree(self.temp_dir)
             raise ValueError(f"XML 파싱 실패: {e}")
+        # 하위 호환: self.root 는 첫 섹션을 가리킨다
+        self.root = self.sections[0][1]
+
+    def roots(self):
+        """모든 섹션의 루트를 문서 순서대로 돌려준다."""
+        return [r for _, r in self.sections]
 
     def get_text(self, start: int = 0, length: Optional[int] = None) -> str:
         """
@@ -117,7 +135,8 @@ class HwpDocument:
                 if child.tail:
                     text_list.append(child.tail)
 
-        extract_text(self.root)
+        for r in self.roots():
+            extract_text(r)
         full_text = ''.join(text_list)
 
         if length is None:
@@ -133,7 +152,7 @@ class HwpDocument:
         """문서의 단락 수 반환"""
         # 단락은 <p> 태그로 표현됨
         para_count = 0
-        for p in self.root.iter():
+        for p in (e for r in self.roots() for e in r.iter()):
             if p.tag.endswith('}p') or p.tag == 'p':
                 para_count += 1
         return para_count
@@ -190,9 +209,10 @@ class HwpDocument:
         if not changed or self.root is None:
             return
         parent = {}
-        for par in self.root.iter():
-            for ch in par:
-                parent[id(ch)] = par
+        for r in self.roots():
+            for par in r.iter():
+                for ch in par:
+                    parent[id(ch)] = par
         ptag = self._q('p')
         done = set()
         for elem in changed:
@@ -221,7 +241,7 @@ class HwpDocument:
         if self.root is None:
             return []
         out = []
-        for i, t in enumerate(self.root.iter(self._q('t'))):
+        for i, t in enumerate(e for r in self.roots() for e in r.iter(self._q('t'))):
             if t.text and chr(10) in t.text:
                 out.append((i, t.text))
         return out
@@ -243,8 +263,8 @@ class HwpDocument:
         replaced_count = 0
         changed = []
 
-        # 모든 텍스트 엘리먼트 순회
-        for elem in self.root.iter():
+        # 모든 섹션의 텍스트 엘리먼트 순회
+        for elem in (e for r in self.roots() for e in r.iter()):
             if elem.text and search_text in elem.text:
                 elem.text = elem.text.replace(search_text, replace_text)
                 replaced_count += elem.text.count(replace_text)
@@ -270,7 +290,7 @@ class HwpDocument:
         if self.root is None:
             return False
 
-        for elem in self.root.iter():
+        for elem in (e for r in self.roots() for e in r.iter()):
             if elem.text and search_text in elem.text:
                 elem.text = elem.text.replace(search_text, replace_text, 1)
                 self._drop_linesegs_for([elem])
@@ -324,9 +344,9 @@ class HwpDocument:
 
     def get_tables(self) -> List[Any]:
         """문서의 모든 <hp:tbl> 엘리먼트를 문서 순서대로 반환"""
-        if self.root is None:
+        if not self.sections:
             raise ValueError("문서가 로드되지 않았습니다")
-        return list(self.root.iter(self._q('tbl')))
+        return [t for r in self.roots() for t in r.iter(self._q('tbl'))]
 
     def get_cell(self, table_index: int, row: int, col: int):
         """
@@ -464,9 +484,9 @@ class HwpDocument:
         if self.root is None:
             raise ValueError("문서가 로드되지 않았습니다")
 
-        # 수정된 XML 저장
-        tree = ET.ElementTree(self.root)
-        tree.write(self.content_xml, encoding='utf-8', xml_declaration=True)
+        # 수정된 XML을 섹션별로 기록
+        for path, root in self.sections:
+            ET.ElementTree(root).write(str(path), encoding='utf-8', xml_declaration=True)
 
         # 백업 생성 (필요한 경우)
         if self.create_backup and output_path is None and self.backup_path is None:
@@ -493,6 +513,7 @@ class HwpDocument:
         if self.temp_dir and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
         self.root = None
+        self.sections = []
         self.content_xml = None
 
     def __enter__(self):

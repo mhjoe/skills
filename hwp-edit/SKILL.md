@@ -403,6 +403,7 @@ assert not bad, f"hp:t 안의 개행 {len(bad)}곳 - 한글 저장 시 유실된
 | `save(output_path=None)` | 저장 |
 | `close()` | 리소스 해제 (context manager 지원) |
 | `get_document_info()` / `get_style_info()` | 메타정보 |
+| `sections` / `roots()` | 본문 섹션 목록 — `.hwpx`는 본문이 여러 XML로 나뉜다 |
 
 ### 텍스트
 
@@ -437,10 +438,32 @@ HWP/HWPX는 ZIP 아카이브다:
 
 ```
 document.hwpx
-├── Contents/section0.xml   # 본문 (hwpx)
+├── Contents/section0.xml   # 본문 1 (표지·초록 등)
+├── Contents/section1.xml   # 본문 2
+├── Contents/section2.xml   # 본문 3 …  섹션은 여러 개일 수 있다
 ├── Contents/header.xml     # 스타일
 └── content.xml             # 구형 hwp의 본문
 ```
+
+**본문이 `section0.xml` 하나라고 가정하면 안 된다.** 한글은 장/절 구분이나 단 구성이
+바뀌는 지점마다 새 섹션을 만든다. 표지와 국문초록이 `section0`, 영문초록이 `section1`,
+본문 전체가 `section2`에 들어 있는 논문 원고가 대표적이다. 이런 문서에서 `section0`만
+읽으면 **본문을 통째로 놓치고도 오류 하나 나지 않는다.**
+
+`HwpDocument`는 `Contents/section*.xml`을 번호 순으로 모두 읽어 하나의 문서처럼
+다룬다. `get_text()`·`replace_text()`·`get_tables()`는 전 섹션을 문서 순서대로 훑고,
+`save()`는 수정된 섹션을 각각 되쓴다. 섹션 목록은 `doc.sections`(경로, 루트 쌍),
+루트만 필요하면 `doc.roots()`로 얻는다.
+
+```python
+doc = HwpDocument("원고.hwpx")
+len(doc.sections)          # 3
+doc.count_text("국문 초록")  # section0 에 있어도 잡힌다
+```
+
+**표 인덱스는 전 섹션을 통틀어 매긴다.** `dump_tables()`가 보여주는 번호를 그대로
+쓰면 되지만, 섹션이 여럿인 문서에서는 `section0`의 표가 앞 번호를 차지하므로
+본문 표의 번호가 뒤로 밀린다. 좌표를 외워 쓰지 말고 매번 `dump_tables()`로 확인할 것.
 
 본문의 계층:
 
@@ -561,6 +584,18 @@ Get-Process Hwp | Select-Object Id, MainWindowTitle
 `Quit()` 직후 새 `Dispatch()`를 호출해도 같은 증상이 난다 — 한 인스턴스를
 재사용할 것. **Hwp 프로세스를 반복 강제 종료하면 COM이 통째로 응답 불능이 된다.**
 복구하려면 사용자에게 한글을 직접 한 번 실행했다 닫아달라고 요청한다.
+
+### 본문이 통째로 비어 나온다 / 치환이 아무 데도 적용되지 않는다
+
+문서의 본문이 `section0.xml`이 아닌 다른 섹션에 있는 경우다. 논문 원고처럼 표지·초록과
+본문이 분리된 문서에서 흔하다. 현재 핸들러는 `Contents/section*.xml`을 모두 읽으므로
+이 문제는 해소되었지만, **직접 XML을 열어 다룰 때는 섹션을 모두 순회해야 한다.**
+
+```python
+doc = HwpDocument("원고.hwpx")
+print(len(doc.sections))          # 1이 아니라면 섹션이 여러 개다
+print([q.name for q, _ in doc.sections])
+```
 
 ### 텍스트가 제대로 추출되지 않음
 

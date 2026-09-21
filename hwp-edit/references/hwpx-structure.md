@@ -39,6 +39,23 @@ hc   http://www.hancom.co.kr/hwpml/2011/core
 거의 모든 본문 조작은 `hp` 네임스페이스에서 이뤄진다. `lxml`로 다룰 때는 정규화된
 이름을 쓴다: `{http://www.hancom.co.kr/hwpml/2011/paragraph}tbl`
 
+## 섹션
+
+`.hwpx`의 본문은 `Contents/section0.xml` 하나가 아니다. 한글은 장/절 구분이나 단
+구성이 바뀌는 지점마다 새 섹션을 만들어 `section0.xml`, `section1.xml`,
+`section2.xml` … 로 번호를 붙인다.
+
+```
+Contents/section0.xml   표지·국문초록
+Contents/section1.xml   영문초록
+Contents/section2.xml   본문 전체
+```
+
+**`section0`만 읽으면 본문을 놓치고도 오류가 나지 않는다.** 텍스트 추출·치환·표 탐색은
+모든 `section*.xml`을 번호 순으로 순회해야 하고, 저장할 때도 수정한 섹션을 각각
+되써야 한다. 섹션 사이에 문단·표 번호가 이어지는 것이 아니므로, 문서 전체 기준의
+순번이 필요하면 순회하면서 직접 매겨야 한다.
+
 ## 문단
 
 ```xml
