@@ -173,6 +173,38 @@ class HwpDocument:
         """
         return len(self.find_all(search_text))
 
+    def _drop_linesegs_for(self, changed) -> None:
+        """텍스트를 건드린 엘리먼트들이 속한 문단의 레이아웃 캐시를 제거한다.
+
+        <hp:lineseg>의 textpos는 문단 텍스트에 대한 문자 인덱스다. 텍스트 길이를
+        바꾸고 이 캐시를 남기면,
+
+          - 길어진 경우: 한글이 옛 줄 수대로 그려 글자가 셀 밖으로 넘친다.
+          - 짧아진 경우: textpos가 실제 길이를 넘어서서, 한글이 파일을 열 때
+            "파일이 손상되었거나 다른 프로그램에 의해 변경되었습니다"로 거부한다.
+
+        XML은 well-formed이고 ZIP도 정상이라 파싱 검사로는 잡히지 않는다.
+        캐시는 한글이 열 때 다시 계산하므로 제거해서 잃는 것은 없다.
+        (lxml의 getparent()에 의존하지 않도록 부모 맵을 만들어 올라간다.)
+        """
+        if not changed or self.root is None:
+            return
+        parent = {}
+        for par in self.root.iter():
+            for ch in par:
+                parent[id(ch)] = par
+        ptag = self._q('p')
+        done = set()
+        for elem in changed:
+            node = elem
+            while node is not None and node.tag != ptag:
+                node = parent.get(id(node))
+            if node is None or id(node) in done:
+                continue
+            done.add(id(node))
+            for lsa in node.findall(self._q('linesegarray')):
+                node.remove(lsa)
+
     def replace_text(self, search_text: str, replace_text: str) -> int:
         """
         문서의 모든 텍스트 바꾸기
@@ -188,12 +220,18 @@ class HwpDocument:
             return 0
 
         replaced_count = 0
+        changed = []
 
         # 모든 텍스트 엘리먼트 순회
         for elem in self.root.iter():
             if elem.text and search_text in elem.text:
                 elem.text = elem.text.replace(search_text, replace_text)
                 replaced_count += elem.text.count(replace_text)
+                changed.append(elem)
+
+        # 텍스트 길이가 바뀌었으므로 해당 문단들의 레이아웃 캐시를 버린다.
+        # 남기면 치환 문자열이 더 짧을 때 파일이 열리지 않는다.
+        self._drop_linesegs_for(changed)
 
         return replaced_count
 
@@ -214,6 +252,7 @@ class HwpDocument:
         for elem in self.root.iter():
             if elem.text and search_text in elem.text:
                 elem.text = elem.text.replace(search_text, replace_text, 1)
+                self._drop_linesegs_for([elem])
                 return True
 
         return False

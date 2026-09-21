@@ -463,6 +463,37 @@ def get_text(src: str | os.PathLike) -> str:
     return text
 
 
+def can_open(src: str | os.PathLike) -> bool:
+    """한글이 이 파일을 실제로 열 수 있는지 확인한다(편집 후 검증용).
+
+    XML을 직접 수정하면 well-formed이고 ZIP도 정상이면서 한글만 거부하는 상태가
+    만들어질 수 있다. 대표적인 원인이 <hp:linesegarray>의 textpos가 문단 텍스트
+    길이를 넘어선 경우이고, 이때 한글은 "파일이 손상되었거나 다른 프로그램에
+    의해 변경되었습니다"를 띄운다. lxml 파싱이나 zipfile.testzip()으로는
+    절대 잡히지 않으므로, 저장 직후 이 함수로 확인한다.
+
+        assert can_open("수정본.hwpx"), "한글이 열지 못한다 - linesegarray를 의심할 것"
+
+    편집 단계를 여러 번 거친다면 단계마다 호출해 어느 편집이 깨뜨렸는지
+    이분 탐색으로 좁힐 수 있다.
+
+    파일이 열리지 않을 때만 False를 반환한다. 보안 모듈이 미등록이면
+    HwpSecurityModuleError를 던진다 - 환경 문제를 '파일 손상'으로 오인하지
+    않도록 일부러 구분한다(`hwp_com.py --setup`으로 한 번 등록하면 된다).
+    """
+    app = shared_app()
+    try:
+        ok = bool(app.hwp.Open(str(Path(src).resolve()), open_format(src), "forceopen:true"))
+    except Exception:
+        ok = False
+    finally:
+        try:
+            app.clear()
+        except Exception:
+            pass
+    return ok
+
+
 def _print_status() -> bool:
     st = security_module_status()
     print(f"DLL       : {st['dll'] or '찾을 수 없음'}")
