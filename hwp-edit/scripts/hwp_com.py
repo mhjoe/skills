@@ -494,6 +494,36 @@ def can_open(src: str | os.PathLike) -> bool:
     return ok
 
 
+def roundtrip(src: str | os.PathLike, dst: str | os.PathLike | None = None) -> str:
+    """한글로 열어 다시 저장한다. 저장 과정에서 내용이 유실되는지 확인하는 용도.
+
+    can_open()은 "열리는가"만 본다. 열리지만 **한글이 저장할 때 내용을 버리는**
+    상태가 따로 있다. 대표적인 것이 <hp:t> 안의 개행문자로, 개행 뒤 텍스트가
+    통째로 사라진다. 표의 "0.1649*** (0.0087)"이 저장 후 "0.1649***"가 되는
+    식이라 눈에 잘 띄지도 않는다.
+
+    따라서 XML을 직접 만들어 넣었다면 배포 전에 왕복시켜 비교한다.
+
+        from hwp_handler import HwpDocument
+        from hwp_com import roundtrip
+        rt = roundtrip("수정본.hwpx")                      # 한글이 다시 저장한 사본
+        before = HwpDocument("수정본.hwpx").get_text()
+        after  = HwpDocument(rt).get_text()
+        assert before == after, "한글 저장 과정에서 내용이 바뀌었다"
+
+    정적 사전 점검으로는 HwpDocument.find_text_newlines()가 더 싸고 확실하다.
+    """
+    src = str(Path(src).resolve())
+    if dst is None:
+        dst = str(Path(src).with_suffix("")) + "_roundtrip.hwpx"
+    dst = str(Path(dst).resolve())
+    app = shared_app()
+    app.open(src)
+    out = app.save_as(dst, "HWPX")
+    app.clear()
+    return out
+
+
 def _print_status() -> bool:
     st = security_module_status()
     print(f"DLL       : {st['dll'] or '찾을 수 없음'}")

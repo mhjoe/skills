@@ -205,6 +205,27 @@ class HwpDocument:
             for lsa in node.findall(self._q('linesegarray')):
                 node.remove(lsa)
 
+    def find_text_newlines(self):
+        """<hp:t> 안에 개행문자가 든 곳을 찾는다(저장 시 유실되는 위험 지점).
+
+        HWPX에서 줄바꿈은 <hp:p> 경계다. <hp:t> 안의 개행문자는 화면에 나타나지
+        않을 뿐 아니라, 한글이 그 문서를 열어 저장하면 **개행 뒤의 텍스트가
+        통째로 사라진다.** 파일 자체는 정상적으로 열리므로 can_open()으로도
+        잡히지 않는다. XML을 직접 만들었다면 저장 직전에 이 검사를 돌린다.
+
+            assert not doc.find_text_newlines(), "hp:t 안의 개행 - 저장 시 유실된다"
+
+        Returns:
+            [(순번, 문제 텍스트), ...]
+        """
+        if self.root is None:
+            return []
+        out = []
+        for i, t in enumerate(self.root.iter(self._q('t'))):
+            if t.text and chr(10) in t.text:
+                out.append((i, t.text))
+        return out
+
     def replace_text(self, search_text: str, replace_text: str) -> int:
         """
         문서의 모든 텍스트 바꾸기
@@ -344,7 +365,9 @@ class HwpDocument:
         Args:
             paragraphs: 문자열 또는 문자열 리스트. 리스트의 각 원소가 한 문단이 되며
                         이것이 한글에서 실제 줄바꿈으로 나타난다.
-                        문자열 안의 '\\n'은 줄바꿈이 되지 않으므로 쓰지 말 것.
+                        문자열 안의 '\\n'은 줄바꿈이 되지 않을 뿐 아니라,
+                        한글이 저장할 때 그 뒤 텍스트를 통째로 버린다.
+                        반드시 리스트 원소로 나눌 것.
             expect_label: (col, 기대 텍스트). 지정하면 같은 행의 해당 열 텍스트가
                         기대값과 일치하는지 검증한 뒤 기입한다. 좌표 착오를 잡는
                         안전장치이므로 사용을 권장한다.
@@ -357,7 +380,8 @@ class HwpDocument:
             paragraphs = [paragraphs]
         if any('\n' in p for p in paragraphs):
             raise ValueError(
-                "문단 문자열에 개행문자가 있습니다. HWPX에서 줄바꿈은 별도 문단이므로 "
+                "문단 문자열에 개행문자가 있습니다. HWPX에서 줄바꿈은 별도 문단이며, "
+                "개행문자를 <hp:t>에 넣으면 한글이 저장할 때 그 뒤 텍스트를 유실합니다. "
                 "리스트의 원소로 나누어 전달하세요."
             )
 
