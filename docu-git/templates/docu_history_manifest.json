@@ -1,10 +1,26 @@
 {
-  "$schema": "docu-git-v1.0",
+  "$schema": "docu-git-v1.1",
   "project_name": "Document Git Tracking",
   "created_at": "2026-08-07T16:00:00+09:00",
   "last_updated": "2026-08-07T16:00:00+09:00",
   "active_branch": "main",
   "current_version": "v0.1",
+  "toolchain": [
+    {
+      "name": "docu-git",
+      "version": "1.1.0",
+      "source": "https://github.com/{owner}/skills/tree/main/docu-git",
+      "scope": "버전 부여 및 이력 기록",
+      "requires": null
+    },
+    {
+      "name": "{스킬명}",
+      "version": "{버전}",
+      "source": "{설치 출처 URL 또는 경로}",
+      "scope": "{이 문서에서 담당한 작업 범위}",
+      "requires": "{외부 프로그램 등 요건, 없으면 null}"
+    }
+  ],
   "documents": [
     {
       "doc_id": "doc_001",
@@ -22,6 +38,9 @@
           "key_changes": [
             "서론 작성",
             "목차 뼈대 구성"
+          ],
+          "skills_used": [
+            "docu-git@1.1.0"
           ]
         }
       ]
