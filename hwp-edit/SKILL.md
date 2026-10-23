@@ -9,7 +9,9 @@ description: >-
   없이 동작하고, 원본의 서식은 그대로 유지된다. 빈 문서에서 새 보고서를 생성하는
   작업이 아니라 기존 문서를 편집하는 작업에 쓴다(새 보고서 생성은
   hwpx-report-brief 스킬). 한글의 기본 저장 형식인 바이너리 .hwp는 COM으로
-  .hwpx 변환 후 동일하게 처리한다.
+  .hwpx 변환 후 동일하게 처리한다. 줄 수·쪽수·자간·그림 크기처럼 조판 결과가
+  걸린 작업("끝줄 한두 글자 때문에 줄이 넘어가", "그림을 140mm로 넣어줘",
+  "25쪽에 맞춰줘")은 한글 COM으로 재조판하는 scripts/hwp_layout.py를 쓴다.
 ---
 
 # 한글 문서 읽기 및 수정 (HWP/HWPX)
@@ -27,6 +29,17 @@ description: >-
 - 문서 전체에서 특정 단어를 일괄 치환할 때
 - **심사서·평가표·신청서·점검표 같은 표 양식의 빈 칸을 채울 때** ← 이 스킬의 핵심
 - 문서를 PDF로 내보내야 할 때 (`to_pdf()` — XML로는 불가능해 COM을 쓰므로 한글 필요)
+- **줄 수·쪽수·자간·그림 크기를 다뤄야 할 때** → `scripts/hwp_layout.py`
+  (조판 결과는 한글이 다시 계산해야 알 수 있다. [`references/layout-ops.md`](./references/layout-ops.md))
+
+### 어느 경로로 할지
+
+| 작업 | 경로 |
+|---|---|
+| 텍스트 읽기·치환, 표 셀 기입, 문단 추가·삭제 | XML 직접 편집 (`hwp_handler`) — 한글 불필요 |
+| 줄 수·쪽수 확인, 끝줄 정리(자간), 그림 삽입·크기, PDF | COM 조판 (`hwp_layout`) — 한글 필요 |
+
+**내용은 XML로, 조판은 COM으로.** 섞을 때는 XML 편집을 모두 끝낸 뒤 조판을 마무리한다.
 
 ## 전제 조건
 
@@ -432,6 +445,26 @@ assert not bad, f"hp:t 안의 개행 {len(bad)}곳 - 한글 저장 시 유실된
 | `get_cell_text(t, r, c)` | 셀 텍스트 (빈 셀은 `""`) |
 | `set_cell_text(t, r, c, paragraphs, expect_label=None)` | 셀 내용 교체 |
 
+### 조판 (COM) — `hwp_layout.LayoutSession`
+
+| 메서드 | 설명 |
+|---|---|
+| `LayoutSession(path, visible=True)` | 한글로 열기 (창을 숨기면 조판이 계산되지 않는 판본이 있다) |
+| `pages()` | 쪽수 |
+| `measure(i)` | 문단 i의 쪽·줄 수·마지막 줄 길이(**반각 칸 — 한글 1자 = 2**) |
+| `find_short_last_lines(max_chars=3)` | 끝줄에 n자 이하만 남아 한 줄이 늘어난 문단 목록 |
+| `fit_short_last_lines(max_chars=3)` | 위 문단들의 자간을 -3~-10%로 단계 적용해 한 줄 흡수, 실패 시 원복 |
+| `set_char_shape(i, spacing=, ratio=)` | 문단 하나에만 자간/장평 적용 |
+| `uniform_char_shape(i)` | 문단이 단일 글자모양인지(평탄화 안전 여부) 확인 |
+| `insert_picture(img, width_mm, index=)` | 그림 삽입 후 지정 폭으로 보정 (`InstId`로 대상 식별) |
+| `save(path=None)` | 저장 + **수정시각 검증**(같은 경로 SaveAs 실패·파일 잠금 감지) |
+| `export_pdf(path=None)` | PDF 출력 |
+| `close()` | 수정 표시를 지우고 종료 — 잔존 프로세스 방지 |
+
+```bash
+uv run --python 3.12 --link-mode=copy --with pywin32 --with pillow python scripts/hwp_layout.py --check
+```
+
 ### 검증 (COM)
 
 | 함수 | 설명 |
@@ -620,4 +653,7 @@ print([q.name for q, _ in doc.sections])
 - ⚠️ 한컴 Assistant MCP 서버는 호출 앱을 검사해 에이전트를 거부한다 — 쓰지 말 것
   (자세한 내용은 [`references/com-automation.md`](./references/com-automation.md))
 - ✅ 텍스트 읽기/수정, 표 셀 기입, 서식 유지, 자동 백업
+- ⚠️ 조판 작업(`hwp_layout`)은 한글 설치가 필요하다 — 없으면 해당 작업을 보류하고
+  사용자에게 알릴 것 (다른 수단으로 대체하면 서식·조판이 어긋난다)
 - ✅ COM 폴백으로 `.hwp` ↔ `.hwpx` 변환, PDF 내보내기
+- ✅ 조판: 줄 수·쪽수 계측, 끝줄 자간 정리, 그림 삽입·크기 지정
