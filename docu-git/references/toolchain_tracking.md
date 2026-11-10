@@ -48,13 +48,13 @@
 | :--- | :---: | :--- | :--- |
 | hwp-edit | 1.0.0 | 본문·표 텍스트 편집, 서식 보존 | https://github.com/{owner}/skills/tree/main/hwp-edit |
 | python+hwp-com | - | 자간·그림·쪽수 등 조판 작업, PDF 출력 | 한글(Hancom Office) 설치 필요 |
-| docu-git | 1.1.0 | 버전 부여 및 이력 기록 | https://github.com/{owner}/skills/tree/main/docu-git |
+| docu-git | 1.2.0 | 버전 부여 및 이력 기록 | https://github.com/{owner}/skills/tree/main/docu-git |
 ```
 
 ### 3.2 커밋 블록 — 해당 커밋에서 쓴 것
 
 ```markdown
-- **사용 스킬 / 도구**: `hwp-edit@1.0.0` (표 셀 입력), `docu-git@1.1.0` (이력 기록)
+- **사용 스킬 / 도구**: `hwp-edit@1.0.0` (표 셀 입력), `docu-git@1.2.0` (이력 기록)
 ```
 
 ### 3.3 `DOCU_HISTORY.json` — 기계 판독용
@@ -82,7 +82,7 @@
       "history": [
         {
           "commit_id": "doc-commit-20261024-013814",
-          "skills_used": ["python+hwp-com", "docu-git@1.1.0"]
+          "skills_used": ["python+hwp-com", "docu-git@1.2.0"]
         }
       ]
     }
@@ -106,11 +106,11 @@
 
 ```text
 📦 작업 환경 (3개)
-  ✔ docu-git@1.1.0        이력 기록                         (설치됨)
+  ✔ docu-git@1.2.0        이력 기록                         (설치됨)
   ✔ hwp-edit@1.0.0        본문·표 텍스트 편집                (설치됨)
   ✘ python+hwp-com        조판·PDF 출력                     (한글 미설치 — 해당 작업 보류)
 
-마지막 커밋(v2.0)에서 사용: python+hwp-com, docu-git@1.1.0
+마지막 커밋(v2.0)에서 사용: python+hwp-com, docu-git@1.2.0
 ```
 
 ---

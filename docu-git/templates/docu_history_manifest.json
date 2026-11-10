@@ -1,14 +1,13 @@
 {
-  "$schema": "docu-git-v1.1",
+  "$schema": "docu-git-v1.2",
   "project_name": "Document Git Tracking",
   "created_at": "2026-08-07T16:00:00+09:00",
   "last_updated": "2026-08-07T16:00:00+09:00",
   "active_branch": "main",
-  "current_version": "v0.1",
   "toolchain": [
     {
       "name": "docu-git",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "source": "https://github.com/{owner}/skills/tree/main/docu-git",
       "scope": "버전 부여 및 이력 기록",
       "requires": null
@@ -31,6 +30,8 @@
         {
           "commit_id": "doc-commit-20260807-160000",
           "version": "v0.1",
+          "previous_version": null,
+          "version_rationale": "이력 없음 → v0.1",
           "filename": "문서명_v0.1_최초작성.md",
           "timestamp": "2026-08-07T16:00:00+09:00",
           "user_input_summary": "최초 문서 작성 요청",
@@ -40,7 +41,7 @@
             "목차 뼈대 구성"
           ],
           "skills_used": [
-            "docu-git@1.1.0"
+            "docu-git@1.2.0"
           ]
         }
       ]
