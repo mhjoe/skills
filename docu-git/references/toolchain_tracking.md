@@ -23,11 +23,12 @@
 2. 스킬 없이 수행한 경우의 **도구 조합** (예: `python+hwp-com`, `python-docx`, `pandoc`)
 3. 외부 프로그램 의존 (예: 한글, MS Word, LibreOffice)
 4. 산출물 검증에 사용한 수단 (예: `can_open`/`roundtrip` 검증, PDF 렌더링 대조)
+5. **활동 기록(`act-`)의 조사·분석 수단** — 자료조사·분석·검토 활동에서는 검색 도구, DB·API, 통계 패키지, 자체 작성 스크립트가 곧 작업 내용이므로 기록합니다 (예: `WebSearch`, `Crossref REST API`, `python@3.12 + statsmodels@0.15`, 자체 작성 `analysis.py`). 라이브러리는 **결과에 영향을 줄 수 있는 버전**을 적고, 일부만 성공한 도구(호출 제한 등)는 그 사실도 적습니다. 상세는 [`activity_logging.md`](activity_logging.md) §7.
 
 ### 2.2 기록하지 않는다
 - 설치되어 있으나 이번 작업에 쓰지 않은 스킬
 - 파일 복사·백업처럼 어떤 환경에서나 동일한 일반 작업
-- 일회성 조회(웹 검색 등)로 문서 내용에 직접 반영되지 않은 수단
+- 일회성 조회(웹 검색 등)로 **문서 내용에도, 활동 기록의 결과에도 반영되지 않은** 수단 (활동 기록에서 결과를 만든 조사·분석 수단은 §2.1-5에 따라 기록)
 
 ### 2.3 표기 형식
 ```text
@@ -48,13 +49,13 @@
 | :--- | :---: | :--- | :--- |
 | hwp-edit | 1.0.0 | 본문·표 텍스트 편집, 서식 보존 | https://github.com/{owner}/skills/tree/main/hwp-edit |
 | python+hwp-com | - | 자간·그림·쪽수 등 조판 작업, PDF 출력 | 한글(Hancom Office) 설치 필요 |
-| docu-git | 1.2.0 | 버전 부여 및 이력 기록 | https://github.com/{owner}/skills/tree/main/docu-git |
+| docu-git | 1.3.0 | 버전 부여 및 이력 기록 | https://github.com/{owner}/skills/tree/main/docu-git |
 ```
 
 ### 3.2 커밋 블록 — 해당 커밋에서 쓴 것
 
 ```markdown
-- **사용 스킬 / 도구**: `hwp-edit@1.0.0` (표 셀 입력), `docu-git@1.2.0` (이력 기록)
+- **사용 스킬 / 도구**: `hwp-edit@1.0.0` (표 셀 입력), `docu-git@1.3.0` (이력 기록)
 ```
 
 ### 3.3 `DOCU_HISTORY.json` — 기계 판독용
@@ -82,7 +83,7 @@
       "history": [
         {
           "commit_id": "doc-commit-20261024-013814",
-          "skills_used": ["python+hwp-com", "docu-git@1.2.0"]
+          "skills_used": ["python+hwp-com", "docu-git@1.3.0"]
         }
       ]
     }
@@ -106,11 +107,11 @@
 
 ```text
 📦 작업 환경 (3개)
-  ✔ docu-git@1.2.0        이력 기록                         (설치됨)
+  ✔ docu-git@1.3.0        이력 기록                         (설치됨)
   ✔ hwp-edit@1.0.0        본문·표 텍스트 편집                (설치됨)
   ✘ python+hwp-com        조판·PDF 출력                     (한글 미설치 — 해당 작업 보류)
 
-마지막 커밋(v2.0)에서 사용: python+hwp-com, docu-git@1.2.0
+마지막 커밋(v2.0)에서 사용: python+hwp-com, docu-git@1.3.0
 ```
 
 ---

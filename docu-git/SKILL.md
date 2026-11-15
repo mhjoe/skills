@@ -1,9 +1,9 @@
 ---
 name: docu-git
-description: "Git이 소스코드를 이력 관리하듯, 사용자의 문서 작업 요청(Input)과 산출물(Output)을 연속적으로 요약·기록하고 문서 생성/저장 시 파일명에 버전을 자동 반영하는 문서 이력관리 에이전트 스킬. 각 커밋에 사용한 스킬·도구(Toolchain)를 함께 기록해 다른 PC에서도 동일한 작업 환경으로 이어서 작업할 수 있게 한다. {예시: 문서명_v0.5_이론 단일화(젠의 역량접근법)}. Triggers: docu-git, docugit, 문서 이력관리, 문서 버전관리, 이력 기록, 문서 커밋, 문서 버전 저장, 문서 히스토리, 작업 환경 기록, 사용 스킬 기록, document version control, docu history, docu status, docu log, docu diff, docu env."
+description: "Git이 소스코드를 이력 관리하듯, 사용자의 문서 작업 요청(Input)과 산출물(Output)을 연속적으로 요약·기록하고 문서 생성/저장 시 파일명에 버전을 자동 반영하는 문서 이력관리 에이전트 스킬. 문서를 만들거나 고치지 않아도 사전준비·자료조사·분석·검토·의사결정 같은 활동(Activity)을 별도로 기록하며(버전 번호는 올리지 않음), 각 기록에 사용한 스킬·도구(Toolchain)를 함께 남겨 다른 PC에서도 동일한 작업 환경으로 이어서 작업할 수 있게 한다. {예시: 문서명_v0.5_이론 단일화(젠의 역량접근법)}. Triggers: docu-git, docugit, 문서 이력관리, 문서 버전관리, 이력 기록, 문서 커밋, 문서 버전 저장, 문서 히스토리, 작업 환경 기록, 사용 스킬 기록, 작업내역 기록, 활동 기록, 자료조사 기록, 분석 이력, 사전작업 기록, document version control, docu history, docu status, docu log, docu diff, docu env, docu note."
 metadata:
-  version: "1.2.0"
-  last_updated: "2026-11-10"
+  version: "1.3.0"
+  last_updated: "2026-11-16"
   status: active
   task_type: workflow
 ---
@@ -13,6 +13,7 @@ metadata:
 **Docu-Git**은 Git의 변경 이력 관리 메커니즘을 문서 작성 작업에 적용한 에이전트 스킬입니다.
 사용자의 모든 문서 관련 요청(Input)과 에이전트의 산출물(Output)을 핵심 요지가 손실되지 않도록 고밀도로 요약하여 기록하고, 저장되는 파일명에 버전을 자동으로 부여 관리합니다.
 또한 각 커밋에서 **어떤 스킬·도구로 작업했는지(Toolchain)** 를 함께 남겨, 다른 PC나 다른 세션에서 작업을 이어받을 때 동일한 방식으로 편집을 계속할 수 있게 합니다.
+문서 파일이 바뀌지 않는 **사전준비·자료조사·분석·검토·의사결정** 도 활동 기록(Activity Entry)으로 남겨, 결론이 어떤 근거에서 나왔고 무엇이 정정·미결인지 추적할 수 있게 합니다.
 
 ---
 
@@ -26,13 +27,16 @@ metadata:
 3. **고밀도 요약 (High-Density Summarization)**: 장문의 요청과 산출물에서 노이즈를 제거하고 핵심 논지 및 구조적 변화만 3~5줄로 압축 추출.
 4. **Git 라이크 문서 관리 명령어 세트**: Status, Log, Diff, Branch(변형 문서), Tag, Rollback 이력 추적 지원.
 5. **작업 환경(Toolchain) 기록**: 각 커밋에 사용한 스킬·도구와 그 출처를 함께 기록하여, 다른 PC에서 이력을 열었을 때 동일한 스킬로 작업을 이어갈 수 있도록 보장. 상세 규칙은 [`references/toolchain_tracking.md`](references/toolchain_tracking.md).
+6. **활동(Activity) 기록 — 문서가 없어도 기록**: 문서를 생성·수정하지 않은 사전준비(`PREP`)·자료조사(`RESEARCH`)·분석(`ANALYSIS`)·검토(`REVIEW`)·의사결정(`DECISION`)을 `act-` 기록으로 남김. **버전 번호를 올리지 않고**, 자료는 검증 상태(`확인됨`/`부분확인`/`미확인`)와 함께, 오류로 폐기된 결과는 삭제 대신 상태(`INVALIDATED`)로 표시. 상세 규칙은 [`references/activity_logging.md`](references/activity_logging.md).
 
 ---
 
 ## 🚀 트리거 조건 (Trigger Keywords)
 
-- **한국어**: `Docu-Git`, `문서 이력관리`, `문서 버전관리`, `문서 이력 기록`, `문서 커밋`, `문서 버전 저장`, `문서 히스토리`, `이력 남겨줘`, `버전 포함 저장`, `문서 버전 확인`, `작업 환경 기록`, `사용 스킬 기록`
-- **English**: `docu-git`, `docugit`, `document version control`, `docu history`, `docu commit`, `docu log`, `docu diff`, `docu status`, `docu env`
+- **한국어**: `Docu-Git`, `문서 이력관리`, `문서 버전관리`, `문서 이력 기록`, `문서 커밋`, `문서 버전 저장`, `문서 히스토리`, `이력 남겨줘`, `버전 포함 저장`, `문서 버전 확인`, `작업 환경 기록`, `사용 스킬 기록`, `작업내역 기록`, `활동 기록`, `자료조사 기록`, `분석 이력`, `사전작업 기록`
+- **English**: `docu-git`, `docugit`, `document version control`, `docu history`, `docu commit`, `docu log`, `docu diff`, `docu status`, `docu env`, `docu note`
+
+> **문서가 없어도 작동합니다.** 사용자가 "작업내역을 기록해줘"라고만 해도, 문서 산출물이 없는 조사·분석 활동을 활동 기록으로 남깁니다. 이 스킬이 활성화된 세션에서는 §4.1(`references/activity_logging.md`)에 해당하는 활동이 생길 때마다 별도 요청이 없어도 활동 기록 후보로 취급하고, 기록 시점에 사용자에게 알립니다.
 
 ---
 
@@ -42,7 +46,10 @@ Docu-Git 스킬이 활성화되면 문서를 다루는 모든 입출력 프로�
 
 ```mermaid
 flowchart TD
-    Z[0. 이력 확인 + 스킬 버전 점검] --> A[1. 사용자 요청 수신 Input]
+    Z[0. 이력 확인 + 스킬 버전 점검] --> K{문서·산출물 파일을 만들거나 고치는가?}
+    K -- 아니오: 조사·분석·검토·결정만 --> ACT[활동 기록 act-: 버전 번호 불변]
+    ACT --> G
+    K -- 예 --> A[1. 사용자 요청 수신 Input]
     A --> B[2. 핵심 의도 및 지시사항 요약]
     B --> C[3. 문서 작성/수정 수행 Output]
     C --> D[4. 산출물 핵심 요지 추출 및 버전 계산]
@@ -58,6 +65,7 @@ flowchart TD
 - **이력 확인**: 프로젝트에 `DOCU_HISTORY.md`(또는 매니페스트 JSON)가 있는지, 대상 문서(`doc_id`)의 직전 커밋 버전이 무엇인지 먼저 읽습니다. 번호 계산의 출발점입니다.
 - **스킬 버전 점검**: 이력의 `toolchain`에 기록된 `docu-git` 버전이 현재 설치본 `metadata.version`보다 **높으면** 구버전으로 작업 중이라는 뜻이므로, 작업 전에 사용자에게 알리고 `source`에서 업데이트하도록 안내합니다. (설치본이 구버전이면 Toolchain 기록 같은 신규 규칙이 빠질 수 있습니다.)
 - 이력이 없는 문서라면 **이번이 `v0.1`** 임을 확정합니다(기존 파일이 있으면 기준본으로 등록, 파일명은 유지).
+- **기록 단위 판별**: 이번 작업이 문서·산출물 **파일을 만들거나 고치는지**를 먼저 가립니다. 그렇다면 아래 1~6단계(문서 커밋), 파일 변화 없이 조사·분석·검토·결정만 했다면 [활동 기록 워크플로우](#-활동-기록-워크플로우-activity-entry)로 갑니다. 한 작업에 둘 다 있으면 둘 다 만들고 서로 참조합니다. 문서가 하나도 없는 프로젝트에서도 활동 기록은 만들 수 있습니다.
 
 ### 1단계: Input 수신 및 요약 추출
 - 사용자의 요청 문장에서 **작업 의도(Intent)**, **추가/수정/삭제 지시사항**을 포착합니다.
@@ -89,6 +97,23 @@ flowchart TD
 - `references/commit_log_template.md` 템플릿에 따라 프로젝트의 `DOCU_HISTORY.md`에 새 커밋 블록을 추가합니다.
 - 커밋 블록의 **`사용 스킬 / 도구`** 필드와 매니페스트의 `toolchain`·`skills_used`를 함께 갱신합니다.
 - 커밋 블록의 **`버전 근거`** 필드(와 매니페스트 `previous_version`·`version_rationale`)를 반드시 채웁니다. 근거를 한 줄로 쓸 수 없으면 번호를 잘못 정한 것이므로 3단계로 돌아갑니다.
+
+---
+
+## 📝 활동 기록 워크플로우 (Activity Entry)
+
+문서·산출물 파일이 바뀌지 않았어도, 결론과 방향에 영향을 준 **사전준비·자료조사·분석·검토·의사결정** 은 아래 순서로 기록합니다. 상세 규칙·서식·예시는 [`references/activity_logging.md`](references/activity_logging.md)를 따릅니다.
+
+1. **유형 결정**: `PREP` / `RESEARCH` / `ANALYSIS` / `REVIEW` / `DECISION` 중 선택(여럿이면 나누어 기록).
+2. **버전 번호를 부여하지 않습니다.** 활동 기록은 `act-{YYYYMMDD}-{HHMMSS}` ID를 쓰고, 연관 문서가 있으면 `관련 문서`에 `doc_id`와 **그 시점의 문서 버전**만 적습니다. 번호는 문서가 실제로 바뀔 때만 오릅니다(`versioning_rules.md` §1).
+3. **내용 기록**: 요청 요약 → 수행 내용·결과 → 근거 자료(자료조사는 **검증 상태** `확인됨`/`부분확인`/`미확인` 필수) → 산출·보존 위치(`영구`/`임시`, 임시는 재생성 방법) → 결론·미결 사항.
+4. **사용 스킬·도구 기록**: 조사·분석 활동에서는 검색 도구·통계 패키지·자체 스크립트가 곧 작업 내용이므로 `toolchain`에 기록합니다(`toolchain_tracking.md` §2.1).
+5. **시점 구분**: `기록 시점`과 `수행 시점`이 다르면 둘 다 적고, 추정이면 `(추정)`을 붙입니다.
+6. **정정·폐기**: 이후 활동이 이전 결과를 틀렸다고 밝히면 이전 기록을 지우지 않고 상태를 `SUPERSEDED`/`INVALIDATED`로 바꾸고 대체 기록 ID를 연결합니다. 후속 기록에 **무엇이 왜 틀렸는지·영향 범위·수정 방법**을 적습니다.
+7. **저장**: `DOCU_HISTORY.md`에 `## [Activity: act-…]` 블록을 추가하고, 매니페스트 JSON의 최상위 `activities[]`에 항목을 추가합니다. 헤더의 타임라인에도 한 줄 남깁니다.
+
+> 활동 중에 코드·결과표·초안 같은 **산출 파일을 새로 만들거나 고쳤다면** 그 파일은 문서로 취급해 **문서 커밋**(+0.1)을 만들고, 활동 기록과 서로 참조합니다.
+> 공개 저장소에 올라갈 수 있는 이력에는 개인정보·미공개 연구자료를 적지 않습니다(`activity_logging.md` §8).
 
 ---
 
@@ -124,8 +149,11 @@ flowchart TD
 
 | 명령어 / 요청 | 설명 및 동작 |
 | :--- | :--- |
-| **`docu-git status`** | 현재 관리 중인 문서 목록, 최신 버전(`vX.Y`), 활성 브랜치 및 최근 커밋 타임스탬프 표시 |
-| **`docu-git log`** | 지금까지 기록된 사용자 요청(Input)과 산출물(Output)의 핵심 이력 타임라인 조회 |
+| **`docu-git status`** | 현재 관리 중인 문서 목록, 최신 버전(`vX.Y`), 활성 브랜치 및 최근 커밋 타임스탬프 표시. **마지막 문서 커밋 이후의 활동 기록 수**, `INVALIDATED`/`SUPERSEDED` 상태 기록, 미결 사항 건수도 함께 표시 |
+| **`docu-git log`** | 지금까지 기록된 사용자 요청(Input)과 산출물(Output)의 핵심 이력 타임라인 조회. 문서 커밋과 활동 기록을 시간순으로 함께 보여 줌 |
+| **`docu-git log --activities`** / **`--docs`** | 활동 기록만 / 문서 커밋만 필터. `--activities`는 유형(`PREP`·`RESEARCH`·`ANALYSIS`·`REVIEW`·`DECISION`)별 필터 지원 |
+| **`docu-git note <유형> <제목>`** | 문서 변경 없이 **활동 기록만** 남김(예: `docu-git note RESEARCH 선행연구 서지 검증`). 버전 번호는 변하지 않음 |
+| **`docu-git open`** | 모든 활동 기록의 미결 사항과 `부분확인`/`미확인` 자료를 모아 보여 줌 (이어받을 때 첫 확인용) |
 | **`docu-git diff <v1> <v2>`** | 두 버전 간의 주요 구조적 변화, 추가/삭제된 핵심 개념 및 논지 차이점 비교 |
 | **`docu-git branch <이름>`** | 원본 문서 기반의 변형 버전(예: `요약보고서`, `발표자료용`, `영문판`) 분기 관리 |
 | **`docu-git tag <태그명>`** | `final-draft`, `submitted`, `reviewed` 등 이정표 태그 부여 |
@@ -142,4 +170,5 @@ flowchart TD
 - **버전 규칙 & 요약 지침**: [`references/versioning_rules.md`](references/versioning_rules.md)
 - **커밋 로그 템플릿**: [`references/commit_log_template.md`](references/commit_log_template.md)
 - **작업 환경 기록 규칙**: [`references/toolchain_tracking.md`](references/toolchain_tracking.md)
+- **활동(Activity) 기록 지침**: [`references/activity_logging.md`](references/activity_logging.md)
 - **이력 매니페스트 JSON**: [`templates/docu_history_manifest.json`](templates/docu_history_manifest.json)
