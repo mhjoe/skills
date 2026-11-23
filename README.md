@@ -34,6 +34,7 @@
   - 문단 리스트로 줄바꿈 처리 + 레이아웃 캐시 제거로 **셀 밖 넘침 방지**
   - 수정 전 자동 백업
   - **버전 간 회귀 점검**(`scripts/compare_versions.py`) — 새 버전을 직전 버전과 비교해 의도한 치환 외 텍스트·이미지·표 개수 차이를 보고. 옛 버전에서 출발해 중간 수정이 사라지는 사고 방지
+  - **차례 쪽번호 깨짐 수리**(`scripts/check_toc.py`, `HwpDocument.reset_tab_layout()`) — 목차의 쪽번호가 `24`→`4 ··· 2`처럼 뒤집혀 보이는 것은 값이 아니라 줄 배치 캐시(`linesegarray`) 문제다. 점선 탭 줄의 캐시만 지우면 정렬되며, PDF로 쪽번호를 대조하는 검증기 포함
   - **포맷 자동 판별**(`detect_format`) — 확장자가 아닌 파일 시그니처로 ZIP/OLE 구분
   - **COM 폴백**(`scripts/hwp_com.py`) — 바이너리 `.hwp` ↔ `.hwpx` 변환, PDF 내보내기
   - 실행은 `pip`가 아닌 `uv run --with` (uv 관리 환경에서 `pip install`은 실패)

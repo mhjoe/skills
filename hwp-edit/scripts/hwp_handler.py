@@ -225,6 +225,43 @@ class HwpDocument:
             for lsa in node.findall(self._q('linesegarray')):
                 node.remove(lsa)
 
+    def reset_tab_layout(self) -> int:
+        """점선(채움) 오른쪽 탭 줄(차례·목차)의 줄 배치 캐시를 지운다.
+
+        차례 줄의 쪽번호가 "24"→"4 ··· 2", "125"→"521"처럼 자릿수가 뒤집히거나
+        떨어져 보일 때 쓴다. XML 값은 정상이고 화면만 깨진 것이다. 원인은 이런 줄이
+        한글이 저장해 둔 줄 배치 캐시(<hp:linesegarray>)를 믿고 오른쪽 탭 끝을
+        계산하는데, HWP↔HWPX 왕복 뒤 그 캐시가 실제 글자 폭과 어긋나는 것이다.
+        같은 모양의 줄 중 일부만 깨지고, 고치지 않은 줄도 이미 깨져 있을 수 있다.
+
+        캐시는 한글이 열 때 다시 계산하므로 지워서 잃는 것이 없다. 탭 폭(width)이나
+        문단 모양의 탭 정의는 건드릴 필요가 없다. 쪽번호 문자열을 직접 바꾸는
+        편집(차례 갱신)을 했다면 저장 전에 이 메서드를 부른다.
+
+            doc.reset_tab_layout()
+            doc.save("고친문서.hwpx")
+
+        Returns:
+            캐시를 지운 문단 수
+        """
+        if self.root is None:
+            return 0
+        ptag, ttag, tabtag = self._q('p'), self._q('t'), self._q('tab')
+        n = 0
+        for r in self.roots():
+            for p in list(r.iter(ptag)):
+                hit = False
+                for t in p.iter(ttag):
+                    tab = t.find(tabtag)
+                    if tab is not None and tab.get('leader', '0') != '0' and (tab.tail or '').strip():
+                        hit = True
+                        break
+                if hit:
+                    for lsa in p.findall(self._q('linesegarray')):
+                        p.remove(lsa)
+                        n += 1
+        return n
+
     def find_text_newlines(self):
         """<hp:t> 안에 개행문자가 든 곳을 찾는다(저장 시 유실되는 위험 지점).
 
